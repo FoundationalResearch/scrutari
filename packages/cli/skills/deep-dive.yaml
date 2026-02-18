@@ -1,0 +1,107 @@
+name: deep-dive
+version: "1.0"
+description: Comprehensive analysis of a company or sector with multi-stage research pipeline
+author: scrutari
+
+inputs:
+  - name: ticker
+    type: string
+    required: true
+    description: Stock ticker symbol to analyze
+  - name: depth
+    type: string
+    required: false
+    default: standard
+    description: Analysis depth (quick, standard, deep)
+
+tools_required:
+  - edgar
+  - market-data
+tools_optional:
+  - news
+  - web-search
+
+stages:
+  - name: gather
+    description: Collect SEC filings, financial data, and recent news
+    model: claude-haiku-3-5-20241022
+    temperature: 0
+    tools:
+      - edgar
+      - market-data
+      - news
+    prompt: >
+      Gather comprehensive data for {ticker}. Pull the latest 10-K and 10-Q
+      filings from SEC EDGAR, current market data including price history,
+      and recent news articles. Depth level: {depth}.
+    output_format: json
+    max_tokens: 4096
+
+  - name: extract
+    description: Extract key financial metrics and events from gathered data
+    model: claude-haiku-3-5-20241022
+    temperature: 0
+    prompt: >
+      From the gathered data, extract key financial metrics: revenue, earnings,
+      margins, growth rates, debt levels, and cash flow. Identify significant
+      events, management changes, and strategic shifts.
+    output_format: json
+    input_from:
+      - gather
+
+  - name: analyze
+    description: Deep analytical assessment of financial health and competitive position
+    model: claude-sonnet-4-20250514
+    temperature: 0.3
+    prompt: >
+      Perform a thorough analysis of {ticker} based on the extracted metrics.
+      Evaluate financial health, competitive positioning, industry trends,
+      and risk factors. Compare against sector benchmarks where available.
+    output_format: markdown
+    input_from:
+      - extract
+
+  - name: verify
+    description: Cross-reference claims and check for inconsistencies
+    model: claude-sonnet-4-20250514
+    temperature: 0.1
+    tools:
+      - web-search
+    prompt: >
+      Verify the key claims and data points from the analysis. Cross-reference
+      financial figures with primary sources. Flag any inconsistencies or
+      areas that need further investigation.
+    output_format: json
+    input_from:
+      - analyze
+
+  - name: synthesize
+    description: Synthesize findings into a cohesive narrative
+    model: claude-sonnet-4-20250514
+    temperature: 0.5
+    prompt: >
+      Synthesize all findings into a cohesive deep-dive report for {ticker}.
+      Include an executive summary, detailed analysis sections, risk assessment,
+      and forward-looking considerations. Incorporate verification results.
+    output_format: markdown
+    input_from:
+      - analyze
+      - verify
+
+  - name: format
+    description: Format the final report with proper structure and citations
+    model: claude-haiku-3-5-20241022
+    temperature: 0
+    prompt: >
+      Format the synthesized report into a professional deep-dive document.
+      Add proper section headers, tables for financial data, citation links,
+      and an appendix with raw data references.
+    output_format: markdown
+    input_from:
+      - synthesize
+
+output:
+  primary: format
+  format: markdown
+  save_intermediate: true
+  filename_template: "{ticker}-deep-dive"

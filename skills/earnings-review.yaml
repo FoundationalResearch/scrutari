@@ -1,0 +1,79 @@
+name: earnings-review
+version: "1.0"
+description: Quarterly earnings analysis and comparison against estimates
+author: scrutari
+
+inputs:
+  - name: ticker
+    type: string
+    required: true
+    description: Stock ticker symbol to review
+  - name: quarter
+    type: string
+    required: false
+    description: "Fiscal quarter to analyze (e.g., Q3 2024)"
+
+tools_required:
+  - edgar
+  - market-data
+
+stages:
+  - name: gather
+    description: Fetch earnings release, transcript, and consensus estimates
+    model: claude-haiku-3-5-20241022
+    temperature: 0
+    tools:
+      - edgar
+      - market-data
+    prompt: >
+      Gather earnings data for {ticker}. Fetch the latest quarterly earnings
+      release and earnings call transcript from SEC EDGAR. Pull consensus
+      analyst estimates and prior quarter results for comparison.
+      Quarter filter: {quarter}.
+    output_format: json
+    max_tokens: 4096
+
+  - name: extract
+    description: Extract key metrics and management commentary
+    model: claude-haiku-3-5-20241022
+    temperature: 0
+    prompt: >
+      Extract key earnings metrics from the gathered data: EPS (reported vs
+      estimated), revenue (reported vs estimated), gross margin, operating
+      margin, guidance figures, and notable management commentary from the
+      earnings call transcript.
+    output_format: json
+    input_from:
+      - gather
+
+  - name: analyze
+    description: Analyze beat/miss patterns and forward guidance
+    model: claude-sonnet-4-20250514
+    temperature: 0.3
+    prompt: >
+      Analyze the earnings results for {ticker}. Determine beat/miss on EPS
+      and revenue vs consensus. Evaluate the quality of the beat or miss
+      (one-time items vs organic). Assess forward guidance relative to
+      market expectations. Identify trends across recent quarters.
+    output_format: markdown
+    input_from:
+      - extract
+
+  - name: summarize
+    description: Produce a concise earnings summary with investment implications
+    model: claude-sonnet-4-20250514
+    temperature: 0.4
+    prompt: >
+      Create a concise earnings review summary for {ticker}. Include:
+      headline verdict (beat/miss/inline), key metrics table, guidance
+      assessment, notable management quotes, and investment implications.
+      Keep the tone analytical and data-driven.
+    output_format: markdown
+    input_from:
+      - analyze
+
+output:
+  primary: summarize
+  format: markdown
+  save_intermediate: false
+  filename_template: "{ticker}-earnings-review"

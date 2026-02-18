@@ -1,0 +1,22 @@
+# Scrutari Default Configuration Template
+# Copy to ~/.scrutari/config.yaml and customize
+
+providers:
+  anthropic:
+    api_key: env:ANTHROPIC_API_KEY
+    default_model: "claude-sonnet-4-20250514"
+  openai:
+    api_key: env:OPENAI_API_KEY
+    default_model: "gpt-4o"
+
+defaults:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  max_budget_usd: 5.0
+  output_format: markdown
+  output_dir: "./output"
+
+mcp:
+  servers: []
+
+skills_dir: "~/.scrutari/skills"

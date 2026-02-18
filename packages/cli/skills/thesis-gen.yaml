@@ -1,0 +1,75 @@
+name: thesis-gen
+version: "1.0"
+description: Generate a structured investment thesis based on comprehensive research
+author: scrutari
+
+inputs:
+  - name: ticker
+    type: string
+    required: true
+    description: Stock ticker symbol for thesis generation
+  - name: bias
+    type: string
+    required: false
+    default: neutral
+    description: Starting perspective (bullish, bearish, neutral)
+
+tools_required:
+  - edgar
+  - market-data
+tools_optional:
+  - news
+  - web-search
+
+stages:
+  - name: gather
+    description: Collect all relevant research data
+    model: claude-haiku-3-5-20241022
+    temperature: 0
+    tools:
+      - edgar
+      - market-data
+      - news
+    prompt: >
+      Gather comprehensive research data for {ticker} to support investment
+      thesis generation. Pull SEC filings, financial statements, market data,
+      analyst coverage, and recent news. Starting perspective: {bias}.
+    output_format: json
+    max_tokens: 8192
+
+  - name: analyze
+    description: Analyze bull and bear cases with supporting evidence
+    model: claude-sonnet-4-20250514
+    temperature: 0.4
+    prompt: >
+      Analyze {ticker} from both bull and bear perspectives regardless of
+      the {bias} starting point. For each case, identify key drivers,
+      supporting data points, catalyst timeline, and risk factors.
+      Evaluate management quality, competitive moat, and market dynamics.
+    output_format: markdown
+    input_from:
+      - gather
+
+  - name: generate
+    description: Generate a structured investment thesis document
+    model: claude-sonnet-4-20250514
+    temperature: 0.5
+    prompt: >
+      Generate a structured investment thesis for {ticker}. Include:
+      1) Executive summary with clear bull/bear/neutral verdict
+      2) Company overview and competitive positioning
+      3) Financial analysis with key metrics
+      4) Bull case with catalysts and upside targets
+      5) Bear case with risks and downside scenarios
+      6) Valuation assessment and price target range
+      7) Recommended position sizing and time horizon
+      Maintain analytical rigor while being actionable.
+    output_format: markdown
+    input_from:
+      - analyze
+
+output:
+  primary: generate
+  format: markdown
+  save_intermediate: false
+  filename_template: "{ticker}-investment-thesis"

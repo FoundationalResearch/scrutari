@@ -1,0 +1,40 @@
+import { defineConfig } from 'tsup';
+
+export default defineConfig({
+  entry: ['src/index.ts'],
+  format: ['esm'],
+  target: 'node20',
+  outDir: 'dist',
+  clean: true,
+  splitting: false,
+  sourcemap: true,
+  dts: false,
+  // Bundle workspace packages (@scrutari/*) into the output
+  noExternal: [
+    '@scrutari/core',
+    '@scrutari/tools',
+    '@scrutari/mcp',
+  ],
+  // Don't bundle npm dependencies — they'll be in node_modules
+  external: [
+    'ai',
+    '@ai-sdk/anthropic',
+    '@ai-sdk/openai',
+    '@modelcontextprotocol/sdk',
+    'chalk',
+    'commander',
+    'conf',
+    'docx',
+    'eventemitter3',
+    'ink',
+    'ink-spinner',
+    'ora',
+    'react',
+    'yaml',
+    'zod',
+  ],
+  // Shebang is already in src/index.ts, tsup preserves it
+  esbuildOptions(options) {
+    options.jsx = 'automatic';
+  },
+});

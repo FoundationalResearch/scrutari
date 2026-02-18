@@ -1,0 +1,80 @@
+name: comp-analysis
+version: "1.0"
+description: Competitive analysis across multiple companies in the same sector
+author: scrutari
+
+inputs:
+  - name: tickers
+    type: "string[]"
+    required: true
+    description: List of ticker symbols to compare
+  - name: sector
+    type: string
+    required: false
+    description: Industry sector for contextual benchmarks
+
+tools_required:
+  - edgar
+  - market-data
+tools_optional:
+  - news
+
+stages:
+  - name: gather
+    description: Collect financial data for all companies
+    model: claude-haiku-3-5-20241022
+    temperature: 0
+    tools:
+      - edgar
+      - market-data
+    prompt: >
+      Gather financial data for each company in {tickers}. For each ticker,
+      pull the latest annual and quarterly filings, current market data,
+      and valuation metrics. Sector context: {sector}.
+    output_format: json
+    max_tokens: 8192
+
+  - name: normalize
+    description: Normalize metrics for cross-company comparison
+    model: claude-haiku-3-5-20241022
+    temperature: 0
+    prompt: >
+      Normalize the gathered financial data across all companies for fair
+      comparison. Standardize metrics including revenue growth, margins,
+      P/E ratios, EV/EBITDA, debt-to-equity, and ROE. Account for
+      differences in fiscal year timing and reporting standards.
+    output_format: json
+    input_from:
+      - gather
+
+  - name: compare
+    description: Perform head-to-head comparative analysis
+    model: claude-sonnet-4-20250514
+    temperature: 0.3
+    prompt: >
+      Perform a detailed comparative analysis of {tickers}. Rank companies
+      across key dimensions: growth, profitability, valuation, balance
+      sheet strength, and market position. Identify relative strengths
+      and weaknesses for each company.
+    output_format: markdown
+    input_from:
+      - normalize
+
+  - name: report
+    description: Generate a structured competitive analysis report
+    model: claude-sonnet-4-20250514
+    temperature: 0.4
+    prompt: >
+      Generate a comprehensive competitive analysis report for {tickers}.
+      Include comparison tables, relative ranking charts, sector positioning
+      analysis, and a summary of which companies stand out and why.
+      Highlight key differentiators and potential catalysts.
+    output_format: markdown
+    input_from:
+      - compare
+
+output:
+  primary: report
+  format: markdown
+  save_intermediate: true
+  filename_template: "comp-analysis-{sector}"
