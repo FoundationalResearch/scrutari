@@ -1,18 +1,31 @@
-<p align="center">
-  <h1 align="center">scrutari</h1>
-  <p align="center">
-    Interactive financial analysis powered by LLMs
-    <br />
-    <a href="#quick-start">Quick Start</a> &middot; <a href="#built-in-skills">Skills</a> &middot; <a href="#custom-skills">Custom Skills</a> &middot; <a href="#configuration">Configuration</a>
-  </p>
+<div align="center">
+
+<pre>
+   ,___,
+   (O,O)
+   /)  )
+  --"-"--
+</pre>
+
+<h1>scrutari</h1>
+
+<p><strong>Interactive financial analysis powered by LLMs</strong></p>
+
+<p>
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#built-in-skills">Skills</a> &middot;
+  <a href="#custom-skills">Custom Skills</a> &middot;
+  <a href="#configuration">Configuration</a>
 </p>
 
-<p align="center">
+<p>
   <a href="https://www.npmjs.com/package/@foundationalresearch/scrutari"><img src="https://img.shields.io/npm/v/@foundationalresearch/scrutari" alt="npm version" /></a>
   <a href="https://github.com/FoundationalResearch/scrutari/actions"><img src="https://img.shields.io/github/actions/workflow/status/FoundationalResearch/scrutari/ci.yml?branch=main" alt="CI" /></a>
   <a href="https://github.com/FoundationalResearch/scrutari/blob/main/packages/cli/LICENSE"><img src="https://img.shields.io/npm/l/@foundationalresearch/scrutari" alt="License" /></a>
   <a href="https://www.npmjs.com/package/@foundationalresearch/scrutari"><img src="https://img.shields.io/node/v/@foundationalresearch/scrutari" alt="Node version" /></a>
 </p>
+
+</div>
 
 ---
 
@@ -40,33 +53,35 @@ That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY` or `
 ### Example session
 
 ```
-scrutari v0.1.0
-Model: claude-sonnet-4-20250514  Provider: anthropic
-Ask me to analyze any stock, e.g. "analyze NVDA". Press Ctrl+C to exit.
+╭─ scrutari v0.1.0 ────────────────────────────────────────────────────╮
+│                                                                      │
+│  Welcome, user!               │ Tips for getting started             │
+│                               │ "analyze NVDA" run a deep analysis   │
+│     ,___,                     │ "what is AAPL at?" get a stock quote │
+│     (O,O)                     │ "search TSLA filings" search EDGAR   │
+│     /)  )                     │                                      │
+│    --"-"--                    │ Recent sessions                      │
+│                               │ No recent sessions                   │
+│  Claude Sonnet 4 · anthropic  │                                      │
+│  ~/projects                   │                                      │
+│                                                                      │
+╰──────────────────────────────────────────────────────────────────────╯
 
 ❯ analyze NVDA
 ✓ run_pipeline
-  ┌─────────────────────────────────────────────┐
-  │ Pipeline: NVDA (deep-dive)                  │
-  │ ✓ gather      3s   $0.02  claude-haiku      │
-  │ ✓ extract     2s   $0.01  claude-haiku      │
-  │ ✓ analyze     8s   $0.06  claude-sonnet     │
-  │ ✓ verify      5s   $0.03  claude-sonnet     │
-  │ ✓ synthesize  6s   $0.04  claude-sonnet     │
-  │ ✓ format      2s   $0.01  claude-haiku      │
-  │ ✓ Pipeline complete — $0.17                 │
-  └─────────────────────────────────────────────┘
+  Pipeline: NVDA (deep-dive)
+  ✓ gather      3s   $0.02
+  ✓ extract     2s   $0.01
+  ✓ analyze     8s   $0.06
+  ✓ verify      5s   $0.03
+  ✓ synthesize  6s   $0.04
+  ✓ format      2s   $0.01
+  ✓ Pipeline complete — $0.17
 
-Here's the analysis for NVIDIA (NVDA):
-
-## Key Findings
-- Revenue grew 122% YoY driven by data center demand...
-- Gross margin expanded to 78.4%...
-...
+Here's the analysis for NVIDIA (NVDA)...
 
 ❯ what is AAPL trading at?
 Apple (AAPL) is currently trading at $189.84, up +1.23 (+0.65%).
-Market cap: $2.94T, Volume: 52.3M
 
 ❯ search for recent TSLA news
 Here are the latest Tesla headlines...
