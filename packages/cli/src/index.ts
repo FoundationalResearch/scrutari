@@ -11,6 +11,7 @@ import chalk from 'chalk';
 import { loadConfigWithMeta, ConfigError } from './config/index.js';
 import { setConfig } from './context.js';
 import { ChatApp } from './chat/index.js';
+import { listSessions } from './chat/session/storage.js';
 import { scanSkillFiles } from '@scrutari/core';
 
 const VERSION = '0.1.0';
@@ -36,7 +37,7 @@ function expandTilde(path: string): string {
 
 function printHelp(): void {
   console.log(`
-${chalk.cyan.bold('scrutari')} — Interactive financial analysis chat
+${chalk.blue.bold('scrutari')} — Interactive financial analysis chat
 
 ${chalk.bold('Usage:')}
   scrutari [options]
@@ -93,7 +94,7 @@ async function main(): Promise<void> {
     });
 
     if (!configFileExists && envKeysUsed.length > 0) {
-      console.error(chalk.cyan(`  Using ${envKeysUsed.join(', ')} from environment.`));
+      console.error(chalk.blue(`  Using ${envKeysUsed.join(', ')} from environment.`));
       console.error(chalk.dim(`  Run "scrutari init" to create a config file for more options.\n`));
     }
 
@@ -124,15 +125,20 @@ async function main(): Promise<void> {
   const scanned = scanSkillFiles(builtInDir, userDir);
   const skillNames = scanned.map(s => s.name);
 
+  // Load recent sessions for welcome banner
+  const recentSessions = listSessions();
+
   // Render the chat app
   const { waitUntilExit } = render(
     React.createElement(ChatApp, {
       config,
       version: VERSION,
+      cwd: process.cwd(),
       continueSession: values.continue as boolean,
       resumeId: values.resume as string | undefined,
       verbose: values.verbose as boolean,
       skillNames,
+      recentSessions,
     }),
   );
 

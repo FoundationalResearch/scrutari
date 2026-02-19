@@ -19,7 +19,7 @@ export function InputPrompt({ onSubmit, disabled }: InputPromptProps): React.Rea
 
   return (
     <Box marginTop={1}>
-      <Text color={disabled ? 'gray' : 'green'} bold>{'\u276F'} </Text>
+      <Text color={disabled ? 'gray' : 'blue'} bold>{'\u276F'} </Text>
       {disabled ? (
         <Text dimColor>Waiting for response...</Text>
       ) : (

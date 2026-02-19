@@ -40,7 +40,7 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps): Rea
   if (message.role === 'user') {
     return (
       <Box marginY={0}>
-        <Text color="green" bold>{'\u276F'} </Text>
+        <Text color="blue" bold>{'\u276F'} </Text>
         <Text>{message.content}</Text>
       </Box>
     );

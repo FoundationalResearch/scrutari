@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Box, useApp, useInput } from 'ink';
 import type { Config } from '../config/index.js';
+import type { SessionSummary } from './session/types.js';
 import { WelcomeBanner } from './components/WelcomeBanner.js';
 import { MessageList } from './components/MessageList.js';
 import { InputPrompt } from './components/InputPrompt.js';
@@ -10,19 +11,23 @@ import { useOrchestrator } from './hooks/useOrchestrator.js';
 interface ChatAppProps {
   config: Config;
   version: string;
+  cwd: string;
   continueSession?: boolean;
   resumeId?: string;
   verbose?: boolean;
   skillNames: string[];
+  recentSessions: SessionSummary[];
 }
 
 export function ChatApp({
   config,
   version,
+  cwd,
   continueSession,
   resumeId,
   verbose,
   skillNames,
+  recentSessions,
 }: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
   const { messages, addMessage, updateMessage, save, session } = useSession({
@@ -62,7 +67,7 @@ export function ChatApp({
   });
 
   const sessionInfo = continueSession || resumeId
-    ? `Resumed session: ${session.title}`
+    ? session.title
     : undefined;
 
   return (
@@ -71,7 +76,9 @@ export function ChatApp({
         version={version}
         model={config.defaults.model}
         provider={config.defaults.provider}
+        cwd={cwd}
         sessionInfo={sessionInfo}
+        recentSessions={recentSessions}
       />
       <MessageList
         messages={messages}
