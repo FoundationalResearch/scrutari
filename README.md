@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@foundationalresearch/scrutari"><img src="https://img.shields.io/npm/v/@foundationalresearch/scrutari" alt="npm version" /></a>
   <a href="https://github.com/FoundationalResearch/scrutari/actions"><img src="https://img.shields.io/github/actions/workflow/status/FoundationalResearch/scrutari/ci.yml?branch=main" alt="CI" /></a>
-  <a href="https://github.com/FoundationalResearch/scrutari/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@foundationalresearch/scrutari" alt="License" /></a>
+  <a href="https://github.com/FoundationalResearch/scrutari/blob/main/packages/cli/LICENSE"><img src="https://img.shields.io/npm/l/@foundationalresearch/scrutari" alt="License" /></a>
   <a href="https://www.npmjs.com/package/@foundationalresearch/scrutari"><img src="https://img.shields.io/node/v/@foundationalresearch/scrutari" alt="Node version" /></a>
 </p>
 
@@ -387,4 +387,4 @@ cd packages/core && npx vitest
 
 ## License
 
-[MIT](./LICENSE)
+[MIT](./packages/cli/LICENSE)
