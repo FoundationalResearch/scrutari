@@ -98,11 +98,13 @@ async function main(): Promise<void> {
       console.error(chalk.dim(`  Run "scrutari init" to create a config file for more options.\n`));
     }
 
-    const hasAnyKey = loadedConfig.providers.anthropic.api_key || loadedConfig.providers.openai.api_key;
+    const hasAnyKey = loadedConfig.providers.anthropic.api_key || loadedConfig.providers.openai.api_key || loadedConfig.providers.google.api_key;
     if (!hasAnyKey) {
       console.error(chalk.red('No API key found.\n'));
       console.error(chalk.white('Quick start (no config needed):'));
-      console.error(chalk.green('  export ANTHROPIC_API_KEY=sk-ant-...\n'));
+      console.error(chalk.green('  export ANTHROPIC_API_KEY=sk-ant-...'));
+      console.error(chalk.green('  export OPENAI_API_KEY=sk-...'));
+      console.error(chalk.green('  export GEMINI_API_KEY=...\n'));
       console.error(chalk.white('Or create a config file:'));
       console.error(chalk.green('  scrutari init\n'));
       console.error(chalk.dim('Get an API key at: https://console.anthropic.com/'));

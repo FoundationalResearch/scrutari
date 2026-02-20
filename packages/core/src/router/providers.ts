@@ -1,13 +1,15 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel } from 'ai';
 
-export type ProviderId = 'anthropic' | 'openai';
+export type ProviderId = 'anthropic' | 'openai' | 'google';
 
 export interface ProviderConfig {
   providers: {
     anthropic?: { apiKey?: string };
     openai?: { apiKey?: string };
+    google?: { apiKey?: string };
   };
 }
 
@@ -21,6 +23,7 @@ export function detectProvider(modelId: string): ProviderId {
   ) {
     return 'openai';
   }
+  if (modelId.startsWith('gemini-')) return 'google';
   throw new Error(`Cannot determine provider for model: ${modelId}`);
 }
 
@@ -32,6 +35,7 @@ export class ProviderRegistry {
   private config: ProviderConfig;
   private anthropicProvider: ReturnType<typeof createAnthropic> | null = null;
   private openaiProvider: ReturnType<typeof createOpenAI> | null = null;
+  private googleProvider: ReturnType<typeof createGoogleGenerativeAI> | null = null;
 
   constructor(config: ProviderConfig) {
     this.config = config;
@@ -65,6 +69,18 @@ export class ProviderRegistry {
           this.openaiProvider = createOpenAI({ apiKey });
         }
         return this.openaiProvider(modelId);
+      }
+      case 'google': {
+        if (!this.googleProvider) {
+          const apiKey = this.config.providers.google?.apiKey;
+          if (!apiKey) {
+            throw new Error(
+              'Google API key not configured. Set providers.google.api_key in ~/.scrutari/config.yaml',
+            );
+          }
+          this.googleProvider = createGoogleGenerativeAI({ apiKey });
+        }
+        return this.googleProvider(modelId);
       }
     }
   }

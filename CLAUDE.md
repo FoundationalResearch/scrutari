@@ -200,7 +200,7 @@ Chat sessions are JSON files in `~/.scrutari/sessions/`. The `useSession` hook a
 
 ### Cost tracking
 
-Every LLM call records input/output tokens. The `CostTracker` in `packages/core/src/router/cost.ts` accumulates cost per stage. Built-in pricing for Claude and GPT models. Pipeline stops with partial results if budget is exceeded.
+Every LLM call records input/output tokens. The `CostTracker` in `packages/core/src/router/cost.ts` accumulates cost per stage. Built-in pricing for Claude, GPT, and Gemini models. Pipeline stops with partial results if budget is exceeded.
 
 ## File Layout Reference
 
@@ -211,7 +211,7 @@ packages/core/src/
   router/model-router.ts            Task → model routing
   router/llm.ts                     LLM call abstraction
   router/cost.ts                    Token pricing, budget tracking
-  router/providers.ts               Anthropic/OpenAI provider factory
+  router/providers.ts               Anthropic/OpenAI/Google provider factory
   router/retry.ts                   Exponential backoff
   skills/schema.ts                  Zod schema for skill YAML
   skills/loader.ts                  YAML parse, DAG validation, variable substitution

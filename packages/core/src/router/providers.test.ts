@@ -20,9 +20,15 @@ describe('detectProvider', () => {
     expect(detectProvider('o3-mini')).toBe('openai');
   });
 
+  it('detects Google Gemini models', () => {
+    expect(detectProvider('gemini-2.5-pro')).toBe('google');
+    expect(detectProvider('gemini-2.5-flash')).toBe('google');
+    expect(detectProvider('gemini-2.0-flash')).toBe('google');
+  });
+
   it('throws for unknown model prefix', () => {
     expect(() => detectProvider('llama-3-70b')).toThrow('Cannot determine provider');
-    expect(() => detectProvider('gemini-pro')).toThrow('Cannot determine provider');
+    expect(() => detectProvider('mistral-large')).toThrow('Cannot determine provider');
   });
 });
 
@@ -63,6 +69,25 @@ describe('ProviderRegistry', () => {
       },
     });
     const model = registry.getModel('gpt-4o');
+    expect(model).toBeDefined();
+  });
+
+  it('throws when Google API key is missing', () => {
+    const registry = new ProviderRegistry({
+      providers: {},
+    });
+    expect(() => registry.getModel('gemini-2.5-flash')).toThrow(
+      'Google API key not configured',
+    );
+  });
+
+  it('creates Google model when API key is provided', () => {
+    const registry = new ProviderRegistry({
+      providers: {
+        google: { apiKey: 'test-google-key' },
+      },
+    });
+    const model = registry.getModel('gemini-2.5-flash');
     expect(model).toBeDefined();
   });
 

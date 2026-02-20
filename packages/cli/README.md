@@ -31,6 +31,10 @@ Under the hood, Scrutari executes multi-stage LLM research pipelines defined as 
 ```bash
 # Zero config — just set your API key and go
 export ANTHROPIC_API_KEY=sk-ant-...
+# or
+export OPENAI_API_KEY=sk-...
+# or
+export GEMINI_API_KEY=...
 npx @foundationalresearch/scrutari
 ```
 
@@ -41,7 +45,7 @@ npm install -g @foundationalresearch/scrutari
 scrutari
 ```
 
-That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` from your environment and opens an interactive chat.
+That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` from your environment and opens an interactive chat.
 
 ### Example session
 
@@ -127,7 +131,7 @@ Options:
 
 ## Configuration
 
-When `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` is set in your environment, Scrutari works immediately with sensible defaults (Anthropic, Sonnet 4, $5.00 budget). For full control, create `~/.scrutari/config.yaml`.
+When `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` is set in your environment, Scrutari works immediately with sensible defaults (Anthropic, Sonnet 4, $5.00 budget). For full control, create `~/.scrutari/config.yaml`.
 
 See the [full documentation](https://github.com/FoundationalResearch/scrutari#readme) for configuration details, custom skills, MCP servers, and more.
 

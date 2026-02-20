@@ -20,6 +20,7 @@ export default defineConfig({
     'ai',
     '@ai-sdk/anthropic',
     '@ai-sdk/openai',
+    '@ai-sdk/google',
     '@modelcontextprotocol/sdk',
     'chalk',
     'conf',

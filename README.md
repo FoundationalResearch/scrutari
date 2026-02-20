@@ -38,6 +38,10 @@ Under the hood, Scrutari executes multi-stage LLM research pipelines defined as 
 ```bash
 # Zero config — just set your API key and go
 export ANTHROPIC_API_KEY=sk-ant-...
+# or
+export OPENAI_API_KEY=sk-...
+# or
+export GEMINI_API_KEY=...
 npx @foundationalresearch/scrutari
 ```
 
@@ -48,7 +52,7 @@ npm install -g @foundationalresearch/scrutari
 scrutari
 ```
 
-That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` from your environment and opens an interactive chat.
+That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` from your environment and opens an interactive chat.
 
 ### Example session
 
@@ -171,7 +175,7 @@ Both Markdown and DOCX include a **verification section** when the skill has a `
 
 ### Zero-config mode
 
-When `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` is set in your environment, Scrutari works immediately with sensible defaults:
+When `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` is set in your environment, Scrutari works immediately with sensible defaults:
 
 | Setting | Default |
 |---------|---------|
@@ -193,9 +197,12 @@ providers:
   openai:
     api_key: env:OPENAI_API_KEY
     default_model: gpt-4o
+  google:
+    api_key: env:GEMINI_API_KEY
+    default_model: gemini-2.5-flash
 
 defaults:
-  provider: anthropic
+  provider: anthropic                 # anthropic | openai | google
   model: claude-sonnet-4-20250514
   max_budget_usd: 5.0
   output_format: markdown             # markdown | json | docx
@@ -391,6 +398,9 @@ Every pipeline run tracks token usage and cost per stage with built-in pricing f
 | Claude Haiku 3.5 | $0.80 | $4.00 |
 | GPT-4o | $2.50 | $10.00 |
 | GPT-4o Mini | $0.15 | $0.60 |
+| Gemini 2.5 Pro | $1.25 | $10.00 |
+| Gemini 2.5 Flash | $0.15 | $0.60 |
+| Gemini 2.0 Flash | $0.10 | $0.40 |
 
 The default budget cap is $5.00 per pipeline run. If a stage would exceed the budget, the pipeline stops and returns partial results for any completed stages. Cost is displayed inline in the chat during pipeline execution.
 
@@ -406,7 +416,7 @@ The default budget cap is $5.00 per pipeline run. If a stage would exceed the bu
 ## Requirements
 
 - **Node.js** >= 20
-- **API key** from [Anthropic](https://console.anthropic.com/) or [OpenAI](https://platform.openai.com/api-keys)
+- **API key** from [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/api-keys), or [Google AI Studio](https://aistudio.google.com/apikey)
 
 ## Development
 

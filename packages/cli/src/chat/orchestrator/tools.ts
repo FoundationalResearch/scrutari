@@ -88,6 +88,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
             providers: {
               anthropic: { apiKey: config.providers.anthropic.api_key },
               openai: { apiKey: config.providers.openai.api_key },
+              google: { apiKey: config.providers.google.api_key },
             },
           },
           resolveTools,

@@ -33,6 +33,24 @@ describe('getModelPricing', () => {
     expect(pricing.outputPerMillion).toBe(15.0);
   });
 
+  it('returns known pricing for Gemini 2.5 Pro', () => {
+    const pricing = getModelPricing('gemini-2.5-pro');
+    expect(pricing.inputPerMillion).toBe(1.25);
+    expect(pricing.outputPerMillion).toBe(10.0);
+  });
+
+  it('returns known pricing for Gemini 2.5 Flash', () => {
+    const pricing = getModelPricing('gemini-2.5-flash');
+    expect(pricing.inputPerMillion).toBe(0.15);
+    expect(pricing.outputPerMillion).toBe(0.60);
+  });
+
+  it('returns known pricing for Gemini 2.0 Flash', () => {
+    const pricing = getModelPricing('gemini-2.0-flash');
+    expect(pricing.inputPerMillion).toBe(0.10);
+    expect(pricing.outputPerMillion).toBe(0.40);
+  });
+
   it('has pricing for all expected models', () => {
     const expected = [
       'claude-opus-4-20250514',
@@ -42,6 +60,9 @@ describe('getModelPricing', () => {
       'gpt-4o-mini',
       'o1',
       'o1-mini',
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
     ];
     for (const model of expected) {
       expect(MODEL_PRICING[model]).toBeDefined();
@@ -59,6 +80,12 @@ describe('calculateCost', () => {
 
   it('calculates cost for GPT-4o-mini', () => {
     const cost = calculateCost('gpt-4o-mini', 10_000, 5_000);
+    // (10000 * 0.15 + 5000 * 0.60) / 1_000_000 = (1500 + 3000) / 1_000_000 = 0.0045
+    expect(cost).toBeCloseTo(0.0045, 6);
+  });
+
+  it('calculates cost for Gemini 2.5 Flash', () => {
+    const cost = calculateCost('gemini-2.5-flash', 10_000, 5_000);
     // (10000 * 0.15 + 5000 * 0.60) / 1_000_000 = (1500 + 3000) / 1_000_000 = 0.0045
     expect(cost).toBeCloseTo(0.0045, 6);
   });

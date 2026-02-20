@@ -22,10 +22,11 @@ const providerConfigSchema = z.object({
 const providersSchema = z.object({
   anthropic: providerConfigSchema.optional(),
   openai: providerConfigSchema.optional(),
+  google: providerConfigSchema.optional(),
 }).strict();
 
 const defaultsSchema = z.object({
-  provider: z.enum(['anthropic', 'openai']).optional(),
+  provider: z.enum(['anthropic', 'openai', 'google']).optional(),
   model: z.string().optional(),
   max_budget_usd: z.number().positive().optional(),
   output_format: z.enum(['markdown', 'json', 'docx']).optional(),
@@ -71,7 +72,7 @@ const ConfigSchema = z.object({
 
 export type RawConfig = z.infer<typeof ConfigSchema>;
 
-export type ProviderId = 'anthropic' | 'openai';
+export type ProviderId = 'anthropic' | 'openai' | 'google';
 export type OutputFormat = 'markdown' | 'json' | 'docx';
 
 export interface ResolvedProviderConfig {
@@ -90,6 +91,7 @@ export interface Config {
   providers: {
     anthropic: ResolvedProviderConfig;
     openai: ResolvedProviderConfig;
+    google: ResolvedProviderConfig;
   };
   defaults: {
     provider: ProviderId;
@@ -119,6 +121,9 @@ export const ConfigDefaults: Config = {
     },
     openai: {
       default_model: 'gpt-4o',
+    },
+    google: {
+      default_model: 'gemini-2.5-flash',
     },
   },
   mcp: {

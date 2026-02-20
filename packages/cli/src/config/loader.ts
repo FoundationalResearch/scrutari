@@ -103,6 +103,9 @@ function applyEnvVarFallbacks(config: Config): void {
   if (isUnresolvedEnvRef(config.providers.openai.api_key)) {
     config.providers.openai.api_key = undefined;
   }
+  if (isUnresolvedEnvRef(config.providers.google.api_key)) {
+    config.providers.google.api_key = undefined;
+  }
 
   // Apply env var fallbacks
   if (!config.providers.anthropic.api_key) {
@@ -115,6 +118,12 @@ function applyEnvVarFallbacks(config: Config): void {
     const envKey = process.env['OPENAI_API_KEY'];
     if (envKey) {
       config.providers.openai.api_key = envKey;
+    }
+  }
+  if (!config.providers.google.api_key) {
+    const envKey = process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY'];
+    if (envKey) {
+      config.providers.google.api_key = envKey;
     }
   }
 }
@@ -177,6 +186,7 @@ export function loadConfigWithMeta(options: LoadConfigOptions = {}): LoadConfigR
         result.providers = {
           anthropic: { ...result.providers.anthropic, ...validated.data.providers.anthropic },
           openai: { ...result.providers.openai, ...validated.data.providers.openai },
+          google: { ...result.providers.google, ...validated.data.providers.google },
         };
       }
       if (validated.data.mcp?.servers) {
@@ -192,6 +202,13 @@ export function loadConfigWithMeta(options: LoadConfigOptions = {}): LoadConfigR
   }
   if (!result.providers.openai.api_key && process.env['OPENAI_API_KEY']) {
     envKeysUsed.push('OPENAI_API_KEY');
+  }
+  if (!result.providers.google.api_key) {
+    if (process.env['GEMINI_API_KEY']) {
+      envKeysUsed.push('GEMINI_API_KEY');
+    } else if (process.env['GOOGLE_API_KEY']) {
+      envKeysUsed.push('GOOGLE_API_KEY');
+    }
   }
 
   applyEnvVarFallbacks(result);

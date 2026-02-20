@@ -1,6 +1,7 @@
 import { streamText, stepCountIs, type ModelMessage } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { Config } from '../../config/index.js';
 import type { OrchestratorConfig, ChatMessage } from '../types.js';
 import { buildSystemPrompt } from './system-prompt.js';
@@ -15,6 +16,13 @@ function getModel(config: Config) {
       apiKey: config.providers.openai.api_key,
     });
     return openai(modelId);
+  }
+
+  if (provider === 'google') {
+    const google = createGoogleGenerativeAI({
+      apiKey: config.providers.google.api_key,
+    });
+    return google(modelId);
   }
 
   const anthropic = createAnthropic({

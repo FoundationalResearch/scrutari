@@ -20,7 +20,7 @@ describe('config loader', () => {
 
   it('returns defaults when no config file exists', () => {
     const config = loadConfig({ configPath: testConfigPath });
-    
+
     expect(config.defaults.provider).toBe('anthropic');
     expect(config.defaults.model).toBe('claude-sonnet-4-20250514');
     expect(config.defaults.max_budget_usd).toBe(5.0);
@@ -29,6 +29,7 @@ describe('config loader', () => {
     expect(config.skills_dir).toBe('~/.scrutari/skills');
     expect(config.providers.anthropic.default_model).toBe('claude-sonnet-4-20250514');
     expect(config.providers.openai.default_model).toBe('gpt-4o');
+    expect(config.providers.google.default_model).toBe('gemini-2.5-flash');
     expect(config.mcp.servers).toEqual([]);
   });
 
@@ -111,6 +112,26 @@ providers:
     expect(config.providers.anthropic.api_key).toBeUndefined();
   });
 
+  it('loads Google provider config from YAML', () => {
+    mkdirSync(testDir, { recursive: true });
+    writeFileSync(testConfigPath, `
+providers:
+  google:
+    api_key: test-google-key
+    default_model: gemini-2.5-pro
+defaults:
+  provider: google
+  model: gemini-2.5-pro
+`);
+
+    const config = loadConfig({ configPath: testConfigPath });
+
+    expect(config.providers.google.api_key).toBe('test-google-key');
+    expect(config.providers.google.default_model).toBe('gemini-2.5-pro');
+    expect(config.defaults.provider).toBe('google');
+    expect(config.defaults.model).toBe('gemini-2.5-pro');
+  });
+
   it('rejects invalid config with zod validation errors', () => {
     mkdirSync(testDir, { recursive: true });
     writeFileSync(testConfigPath, `
@@ -190,6 +211,31 @@ mcp:
       expect(config.providers.openai.api_key).toBe('sk-openai-auto');
     });
 
+    it('auto-detects GEMINI_API_KEY from env when no config file exists', () => {
+      vi.stubEnv('GEMINI_API_KEY', 'gemini-auto-detect');
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.providers.google.api_key).toBe('gemini-auto-detect');
+    });
+
+    it('auto-detects GOOGLE_API_KEY as fallback when GEMINI_API_KEY is not set', () => {
+      vi.stubEnv('GOOGLE_API_KEY', 'google-fallback-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.providers.google.api_key).toBe('google-fallback-key');
+    });
+
+    it('prefers GEMINI_API_KEY over GOOGLE_API_KEY', () => {
+      vi.stubEnv('GEMINI_API_KEY', 'gemini-primary');
+      vi.stubEnv('GOOGLE_API_KEY', 'google-secondary');
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.providers.google.api_key).toBe('gemini-primary');
+    });
+
     it('auto-detects both keys from env simultaneously', () => {
       vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-both');
       vi.stubEnv('OPENAI_API_KEY', 'sk-openai-both');
@@ -252,6 +298,24 @@ providers:
 
       expect(result.envKeysUsed).toContain('ANTHROPIC_API_KEY');
       expect(result.config.providers.anthropic.api_key).toBe('sk-ant-meta');
+    });
+
+    it('reports envKeysUsed for GEMINI_API_KEY', () => {
+      vi.stubEnv('GEMINI_API_KEY', 'gemini-meta');
+
+      const result = loadConfigWithMeta({ configPath: testConfigPath });
+
+      expect(result.envKeysUsed).toContain('GEMINI_API_KEY');
+      expect(result.config.providers.google.api_key).toBe('gemini-meta');
+    });
+
+    it('reports envKeysUsed for GOOGLE_API_KEY when GEMINI_API_KEY is not set', () => {
+      vi.stubEnv('GOOGLE_API_KEY', 'google-meta');
+
+      const result = loadConfigWithMeta({ configPath: testConfigPath });
+
+      expect(result.envKeysUsed).toContain('GOOGLE_API_KEY');
+      expect(result.config.providers.google.api_key).toBe('google-meta');
     });
 
     it('does not report envKeysUsed when config already has the key', () => {

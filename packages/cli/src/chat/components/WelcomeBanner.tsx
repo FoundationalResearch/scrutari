@@ -35,6 +35,9 @@ function shortModel(modelId: string): string {
   if (modelId.includes('claude-haiku')) return 'Claude Haiku';
   if (modelId.includes('gpt-4o-mini')) return 'GPT-4o Mini';
   if (modelId.includes('gpt-4o')) return 'GPT-4o';
+  if (modelId.includes('gemini-2.5-pro')) return 'Gemini 2.5 Pro';
+  if (modelId.includes('gemini-2.5-flash')) return 'Gemini 2.5 Flash';
+  if (modelId.includes('gemini-2.0-flash')) return 'Gemini 2.0 Flash';
   return modelId;
 }
 

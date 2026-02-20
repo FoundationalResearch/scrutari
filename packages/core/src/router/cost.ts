@@ -14,6 +14,10 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   'gpt-4o-mini':                    { inputPerMillion: 0.15, outputPerMillion: 0.60 },
   'o1':                             { inputPerMillion: 15.0, outputPerMillion: 60.0 },
   'o1-mini':                        { inputPerMillion: 3.0,  outputPerMillion: 12.0 },
+  // Google Gemini
+  'gemini-2.5-pro':                 { inputPerMillion: 1.25, outputPerMillion: 10.0 },
+  'gemini-2.5-flash':               { inputPerMillion: 0.15, outputPerMillion: 0.60 },
+  'gemini-2.0-flash':               { inputPerMillion: 0.10, outputPerMillion: 0.40 },
 };
 
 // Conservative fallback pricing (sonnet-level) for unknown models
