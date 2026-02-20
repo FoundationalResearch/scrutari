@@ -1,9 +1,13 @@
 import type { Config } from '../../config/index.js';
 
-export function buildSystemPrompt(config: Config, skillNames: string[]): string {
+export function buildSystemPrompt(config: Config, skillNames: string[], mcpToolNames: string[] = []): string {
   const skillList = skillNames.length > 0
     ? skillNames.map(s => `  - ${s}`).join('\n')
     : '  (none found)';
+
+  const mcpSection = mcpToolNames.length > 0
+    ? `\n## MCP Tools (External)\n\nThe following tools are provided by connected MCP servers and can be called directly:\n${mcpToolNames.map(t => `  - **${t}**`).join('\n')}\n\nThese tools are also available within pipelines when a skill references the MCP server name in its tools_required/tools_optional.\n`
+    : '';
 
   return `You are scrutari, an AI-powered financial analysis assistant. You help users analyze stocks, compare companies, and research financial data.
 
@@ -11,8 +15,12 @@ export function buildSystemPrompt(config: Config, skillNames: string[]): string 
 
 You have access to the following tools:
 
-1. **run_pipeline** — Run a skill-based analysis pipeline on a stock ticker. Use this for deep analysis (e.g., "analyze NVDA", "deep dive on AAPL").
-   - Requires: ticker (string), optional: skill (string), budget (number)
+1. **run_pipeline** — Run a skill-based analysis pipeline. Use this for deep analysis.
+   - Requires: skill (string), inputs (object — key-value pairs matching the skill's input schema)
+   - Optional: budget (number), model (string — override the model for all stages; omit to use each stage's configured model)
+   - Use list_skills to see what inputs each skill requires.
+   - Example: run_pipeline({ skill: "deep-dive", inputs: { ticker: "NVDA" } })
+   - Example: run_pipeline({ skill: "comp-analysis", inputs: { tickers: ["AAPL", "NVDA", "MSFT"] } })
 
 2. **list_skills** — List all available analysis skills. Use when the user asks what you can do or what skills are available.
 
@@ -29,7 +37,7 @@ You have access to the following tools:
    - action: 'show' to display current config, 'set' to update a value
 
 7. **list_sessions** — List past chat sessions.
-
+${mcpSection}
 ## Available Skills
 ${skillList}
 
@@ -39,7 +47,7 @@ ${skillList}
 - Budget: $${config.defaults.max_budget_usd.toFixed(2)}
 
 ## Guidelines
-- When the user asks to "analyze" a stock, use the run_pipeline tool with the appropriate skill.
+- When the user asks to analyze a stock or run a pipeline, use run_pipeline with the appropriate skill and inputs.
 - Default skill is "deep-dive" unless the user specifies otherwise.
 - For simple price queries, use get_quote instead of running a full pipeline.
 - Be concise in responses. Show key findings clearly.

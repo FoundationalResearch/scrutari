@@ -2,6 +2,7 @@ import { streamText, stepCountIs, type ModelMessage } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import type { MCPClientManager } from '@scrutari/mcp';
 import type { Config } from '../../config/index.js';
 import type { OrchestratorConfig, ChatMessage } from '../types.js';
 import { buildSystemPrompt } from './system-prompt.js';
@@ -51,10 +52,14 @@ export async function runOrchestrator(
   config: Config,
   orchestratorConfig: OrchestratorConfig,
   skillNames: string[],
+  mcpClient?: MCPClientManager,
 ): Promise<OrchestratorResult> {
-  const systemPrompt = buildSystemPrompt(config, skillNames);
+  const mcpToolNames = mcpClient
+    ? mcpClient.listTools().map(t => t.name)
+    : [];
+  const systemPrompt = buildSystemPrompt(config, skillNames, mcpToolNames);
   const model = getModel(config);
-  const tools = createOrchestratorTools(config, orchestratorConfig);
+  const tools = createOrchestratorTools(config, orchestratorConfig, mcpClient);
   const coreMessages = toCoreMessages(messages);
 
   let content = '';

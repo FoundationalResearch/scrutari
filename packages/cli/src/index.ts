@@ -13,6 +13,7 @@ import { setConfig } from './context.js';
 import { ChatApp } from './chat/index.js';
 import { listSessions } from './chat/session/storage.js';
 import { scanSkillFiles } from '@scrutari/core';
+import { MCPClientManager } from '@scrutari/mcp';
 
 const VERSION = '0.1.0';
 
@@ -127,6 +128,20 @@ async function main(): Promise<void> {
   const scanned = scanSkillFiles(builtInDir, userDir);
   const skillNames = scanned.map(s => s.name);
 
+  // Initialize MCP servers (if configured)
+  let mcpClient: MCPClientManager | undefined;
+  if (config.mcp.servers.length > 0) {
+    mcpClient = new MCPClientManager();
+    await mcpClient.initialize(config.mcp.servers, (serverName, error) => {
+      console.error(chalk.yellow(`  MCP server "${serverName}" failed to connect: ${error.message}`));
+    });
+    if (mcpClient.size > 0) {
+      const infos = mcpClient.getServerInfos();
+      const toolCount = infos.reduce((sum, s) => sum + s.tools.length, 0);
+      console.error(chalk.blue(`  MCP: ${mcpClient.size} server(s) connected, ${toolCount} tool(s) available.`));
+    }
+  }
+
   // Load recent sessions for welcome banner
   const recentSessions = listSessions();
 
@@ -141,10 +156,16 @@ async function main(): Promise<void> {
       verbose: values.verbose as boolean,
       skillNames,
       recentSessions,
+      mcpClient,
     }),
   );
 
   await waitUntilExit();
+
+  // Clean up MCP connections on exit
+  if (mcpClient) {
+    await mcpClient.disconnect();
+  }
 }
 
 main().catch((error) => {

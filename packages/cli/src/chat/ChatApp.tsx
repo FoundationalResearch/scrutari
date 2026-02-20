@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, useApp, useInput } from 'ink';
+import type { MCPClientManager } from '@scrutari/mcp';
 import type { Config } from '../config/index.js';
 import type { SessionSummary } from './session/types.js';
 import { WelcomeBanner } from './components/WelcomeBanner.js';
@@ -17,6 +18,7 @@ interface ChatAppProps {
   verbose?: boolean;
   skillNames: string[];
   recentSessions: SessionSummary[];
+  mcpClient?: MCPClientManager;
 }
 
 export function ChatApp({
@@ -28,6 +30,7 @@ export function ChatApp({
   verbose,
   skillNames,
   recentSessions,
+  mcpClient,
 }: ChatAppProps): React.ReactElement {
   const { exit } = useApp();
   const { messages, addMessage, updateMessage, save, session } = useSession({
@@ -40,6 +43,7 @@ export function ChatApp({
     addMessage,
     updateMessage,
     skillNames,
+    mcpClient,
   });
 
   const [ctrlCCount, setCtrlCCount] = useState(0);

@@ -12,7 +12,8 @@ import {
   type PipelineContext,
   type SkillEntry,
 } from '@scrutari/core';
-import { ToolRegistry, type ToolContext } from '@scrutari/tools';
+import { ToolRegistry, type ToolContext, type ToolDefinition } from '@scrutari/tools';
+import { type MCPClientManager, type AdaptedToolDefinition } from '@scrutari/mcp';
 import { listSessions } from '../session/storage.js';
 import type { OrchestratorConfig } from '../types.js';
 
@@ -41,20 +42,76 @@ function findSkill(name: string, builtInDir: string, userDir?: string): SkillEnt
   return loadSkillFile(match.filePath, match.source);
 }
 
-export function createOrchestratorTools(config: Config, orchestratorConfig: OrchestratorConfig) {
+/**
+ * Converts MCP AdaptedToolDefinitions to ToolDefinitions for ToolRegistry.
+ */
+function mcpToToolDefinitions(mcpTools: AdaptedToolDefinition[]): ToolDefinition[] {
+  return mcpTools.map(t => ({
+    name: t.name,
+    description: t.description,
+    parameters: t.parameters,
+    execute: t.execute as ToolDefinition['execute'],
+  }));
+}
+
+/**
+ * Converts MCP AdaptedToolDefinitions to AI SDK tool format for the orchestrator.
+ */
+function mcpToAISDKTools(mcpTools: AdaptedToolDefinition[]): Record<string, {
+  description: string;
+  inputSchema: z.ZodSchema;
+  execute: (params: unknown) => Promise<unknown>;
+}> {
+  const tools: Record<string, {
+    description: string;
+    inputSchema: z.ZodSchema;
+    execute: (params: unknown) => Promise<unknown>;
+  }> = {};
+
+  for (const t of mcpTools) {
+    tools[t.name] = {
+      description: t.description,
+      inputSchema: t.parameters,
+      execute: async (params: unknown) => {
+        const result = await t.execute(params, {});
+        if (!result.success) {
+          return { error: result.error ?? 'MCP tool execution failed' };
+        }
+        return result.data;
+      },
+    };
+  }
+
+  return tools;
+}
+
+export function createOrchestratorTools(config: Config, orchestratorConfig: OrchestratorConfig, mcpClient?: MCPClientManager) {
   const builtInDir = getBuiltInSkillsDir();
   const userDir = expandTilde(config.skills_dir);
 
+  // Get MCP tools once (stable for the lifetime of this tool set)
+  const mcpTools = mcpClient?.listTools() ?? [];
+  const mcpOrchestratorTools = mcpToAISDKTools(mcpTools);
+  const mcpToolDefinitions = mcpToToolDefinitions(mcpTools);
+
   return {
     run_pipeline: {
-      description: 'Run a skill-based analysis pipeline on a stock ticker. Returns the analysis report.',
+      description: 'Run a skill-based analysis pipeline. Pass inputs matching the skill\'s declared input schema.',
       inputSchema: z.object({
-        ticker: z.string().describe('Stock ticker symbol (e.g., AAPL, NVDA)'),
         skill: z.string().default('deep-dive').describe('Analysis skill to use'),
+        inputs: z.record(
+          z.string(),
+          z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+        ).describe('Skill inputs as key-value pairs (e.g. { ticker: "NVDA" } or { tickers: ["AAPL", "NVDA"] })'),
         budget: z.number().optional().describe('Budget cap in USD'),
+        model: z.string().optional().describe('Override the model for all pipeline stages. Omit to use each stage\'s configured model.'),
       }),
-      execute: async ({ ticker, skill: skillName, budget }: { ticker: string; skill: string; budget?: number }) => {
-        const tickerUpper = ticker.toUpperCase();
+      execute: async ({ skill: skillName, inputs: rawInputs, budget, model }: {
+        skill: string;
+        inputs: Record<string, string | number | boolean | string[]>;
+        budget?: number;
+        model?: string;
+      }) => {
         const budgetUsd = budget ?? config.defaults.max_budget_usd;
 
         const skillEntry = findSkill(skillName, builtInDir, userDir);
@@ -64,7 +121,35 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
 
         const skill = skillEntry.skill;
 
+        // Validate inputs against skill's declared input schema
+        const declaredInputs = skill.inputs ?? [];
+        const resolvedInputs: Record<string, string | number | boolean | string[]> = {};
+
+        for (const decl of declaredInputs) {
+          const provided = rawInputs[decl.name];
+          if (provided !== undefined) {
+            resolvedInputs[decl.name] = provided;
+          } else if (decl.default !== undefined) {
+            resolvedInputs[decl.name] = decl.default;
+          } else if (decl.required) {
+            return {
+              error: `Missing required input "${decl.name}" for skill "${skillName}". Expected inputs: ${declaredInputs.map(i => `${i.name} (${i.type}${i.required ? ', required' : ''})`).join(', ')}`,
+            };
+          }
+        }
+
         const toolRegistry = new ToolRegistry();
+
+        // Register MCP tools so pipelines can reference MCP servers as tool groups
+        if (mcpClient) {
+          for (const info of mcpClient.getServerInfos()) {
+            const serverTools = mcpToolDefinitions.filter(t => t.name.startsWith(`${info.name}/`));
+            if (serverTools.length > 0) {
+              toolRegistry.registerGroup(info.name, serverTools);
+            }
+          }
+        }
+
         const toolContext: ToolContext = {
           config: {
             userAgent: config.providers.anthropic.api_key
@@ -81,8 +166,8 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
 
         const pipelineContext: PipelineContext = {
           skill,
-          inputs: { ticker: tickerUpper },
-          modelOverride: config.defaults.model,
+          inputs: resolvedInputs,
+          modelOverride: model,
           maxBudgetUsd: budgetUsd,
           providerConfig: {
             providers: {
@@ -145,7 +230,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
           });
 
           return {
-            ticker: tickerUpper,
+            inputs: resolvedInputs,
             skill: skillName,
             stagesCompleted: result.stagesCompleted,
             totalCostUsd: result.totalCostUsd,
@@ -174,6 +259,13 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
             return {
               name: entry.skill.name,
               description: entry.skill.description,
+              inputs: (entry.skill.inputs ?? []).map(i => ({
+                name: i.name,
+                type: i.type,
+                required: i.required,
+                ...(i.default !== undefined ? { default: i.default } : {}),
+                ...(i.description ? { description: i.description } : {}),
+              })),
               stages: entry.skill.stages.map(st => st.name),
               source: s.source,
             };
@@ -286,5 +378,8 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
         return { sessions };
       },
     },
+
+    // MCP tools exposed directly to the orchestrator LLM
+    ...mcpOrchestratorTools,
   };
 }

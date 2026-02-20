@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { randomUUID } from 'node:crypto';
+import type { MCPClientManager } from '@scrutari/mcp';
 import type { Config } from '../../config/index.js';
 import type { ChatMessage, ToolCallInfo, OrchestratorConfig, PipelineEvent, PipelineRunState } from '../types.js';
 import type { StageState } from '../../tui/types.js';
@@ -11,6 +12,7 @@ interface UseOrchestratorOptions {
   addMessage: (message: ChatMessage) => void;
   updateMessage: (id: string, update: Partial<ChatMessage>) => void;
   skillNames: string[];
+  mcpClient?: MCPClientManager;
 }
 
 interface UseOrchestratorReturn {
@@ -26,6 +28,7 @@ export function useOrchestrator({
   addMessage,
   updateMessage,
   skillNames,
+  mcpClient,
 }: UseOrchestratorOptions): UseOrchestratorReturn {
   const [isProcessing, setIsProcessing] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
@@ -172,7 +175,7 @@ export function useOrchestrator({
 
     // Run the orchestrator
     const allMessages = [...messagesRef.current];
-    runOrchestrator(allMessages, config, orchestratorConfig, skillNames)
+    runOrchestrator(allMessages, config, orchestratorConfig, skillNames, mcpClient)
       .then((result) => {
         // Final update with complete content
         updateMessage(assistantId, {
@@ -200,7 +203,7 @@ export function useOrchestrator({
         setStreamingMessageId(null);
         abortRef.current = null;
       });
-  }, [isProcessing, config, verbose, addMessage, updateMessage, skillNames]);
+  }, [isProcessing, config, verbose, addMessage, updateMessage, skillNames, mcpClient]);
 
   return { isProcessing, streamingMessageId, sendMessage, abort };
 }
