@@ -2,7 +2,7 @@ import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { resolve } from 'path';
 import { parse, stringify } from 'yaml';
-import { ConfigSchema, ConfigDefaults, type RawConfig, type Config } from './schema.js';
+import { ConfigSchema, ConfigDefaults, type RawConfig, type Config, type ProviderId } from './schema.js';
 
 const DEFAULT_CONFIG_PATH = '.scrutari/config.yaml';
 
@@ -239,6 +239,17 @@ export function loadConfigWithMeta(options: LoadConfigOptions = {}): LoadConfigR
   }
 
   applyEnvVarFallbacks(result);
+
+  // Auto-select provider if the default provider has no API key
+  if (!result.providers[result.defaults.provider].api_key) {
+    const providerPriority: ProviderId[] = ['anthropic', 'openai', 'google', 'minimax'];
+    const available = providerPriority.find(p => result.providers[p].api_key);
+    if (available) {
+      result.defaults.provider = available;
+      result.defaults.model = result.providers[available].default_model;
+    }
+  }
+
   return { config: result, configFileExists, envKeysUsed };
 }
 

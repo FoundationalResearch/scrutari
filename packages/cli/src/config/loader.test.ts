@@ -313,6 +313,60 @@ mcp:
       expect(config.providers.minimax.api_key).toBe('minimax-auto-detect');
     });
 
+    it('auto-selects provider when only MINIMAX_API_KEY is set', () => {
+      vi.stubEnv('MINIMAX_API_KEY', 'minimax-only-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.defaults.provider).toBe('minimax');
+      expect(config.defaults.model).toBe('MiniMax-M2');
+      expect(config.providers.minimax.api_key).toBe('minimax-only-key');
+    });
+
+    it('auto-selects provider when only OPENAI_API_KEY is set', () => {
+      vi.stubEnv('OPENAI_API_KEY', 'sk-openai-only');
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.defaults.provider).toBe('openai');
+      expect(config.defaults.model).toBe('gpt-4o');
+    });
+
+    it('auto-selects provider when only GEMINI_API_KEY is set', () => {
+      vi.stubEnv('GEMINI_API_KEY', 'gemini-only');
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.defaults.provider).toBe('google');
+      expect(config.defaults.model).toBe('gemini-2.5-flash');
+    });
+
+    it('prefers anthropic when multiple keys are set', () => {
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-multi');
+      vi.stubEnv('MINIMAX_API_KEY', 'minimax-multi');
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.defaults.provider).toBe('anthropic');
+      expect(config.defaults.model).toBe('claude-sonnet-4-20250514');
+    });
+
+    it('keeps explicit provider from config even without its API key', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+defaults:
+  provider: openai
+  model: gpt-4o
+`);
+      vi.stubEnv('MINIMAX_API_KEY', 'minimax-fallback');
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      // Provider was explicitly set to openai but has no key, so auto-select kicks in
+      expect(config.defaults.provider).toBe('minimax');
+      expect(config.defaults.model).toBe('MiniMax-M2');
+    });
+
     it('auto-detects both keys from env simultaneously', () => {
       vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-both');
       vi.stubEnv('OPENAI_API_KEY', 'sk-openai-both');
