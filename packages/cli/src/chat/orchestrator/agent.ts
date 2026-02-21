@@ -3,7 +3,9 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { MCPClientManager } from '@scrutari/mcp';
+import type { SkillSummary, AgentSkillSummary, AgentSkill, HookManager } from '@scrutari/core';
 import type { Config } from '../../config/index.js';
+import type { ContextBundle } from '../../context/types.js';
 import type { OrchestratorConfig, ChatMessage } from '../types.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import { createOrchestratorTools } from './tools.js';
@@ -26,6 +28,14 @@ function getModel(config: Config) {
     return google(modelId);
   }
 
+  if (provider === 'minimax') {
+    const minimax = createOpenAI({
+      apiKey: config.providers.minimax.api_key,
+      baseURL: 'https://api.minimax.io/v1',
+    });
+    return minimax.chat(modelId);
+  }
+
   const anthropic = createAnthropic({
     apiKey: config.providers.anthropic.api_key,
   });
@@ -45,6 +55,21 @@ export interface OrchestratorResult {
   content: string;
   thinking: string;
   toolCallCount: number;
+  usage?: { inputTokens: number; outputTokens: number };
+}
+
+export interface RunOrchestratorOptions {
+  planMode?: boolean;
+  dryRun?: boolean;
+  readOnly?: boolean;
+  contextBundle?: ContextBundle;
+  skillSummaries?: SkillSummary[];
+  agentSkillSummaries?: AgentSkillSummary[];
+  activeAgentSkill?: AgentSkill;
+  sessionSpentUsd?: number;
+  sessionBudgetUsd?: number;
+  permissions?: Record<string, import('../../config/schema.js').PermissionLevel>;
+  hookManager?: HookManager;
 }
 
 export async function runOrchestrator(
@@ -53,13 +78,31 @@ export async function runOrchestrator(
   orchestratorConfig: OrchestratorConfig,
   skillNames: string[],
   mcpClient?: MCPClientManager,
+  options: RunOrchestratorOptions = {},
 ): Promise<OrchestratorResult> {
   const mcpToolNames = mcpClient
     ? mcpClient.listTools().map(t => t.name)
     : [];
-  const systemPrompt = buildSystemPrompt(config, skillNames, mcpToolNames);
+  const systemPrompt = buildSystemPrompt(config, skillNames, mcpToolNames, {
+    planMode: options.planMode,
+    readOnly: options.readOnly,
+    contextBundle: options.contextBundle,
+    skillSummaries: options.skillSummaries,
+    agentSkillSummaries: options.agentSkillSummaries,
+    activeAgentSkill: options.activeAgentSkill,
+  });
   const model = getModel(config);
-  const tools = createOrchestratorTools(config, orchestratorConfig, mcpClient);
+  const tools = createOrchestratorTools(config, orchestratorConfig, mcpClient, {
+    dryRun: options.dryRun,
+    readOnly: options.readOnly,
+    approvalThreshold: config.defaults.approval_threshold_usd,
+    agentSkillSummaries: options.agentSkillSummaries,
+    activeAgentSkill: options.activeAgentSkill,
+    sessionSpentUsd: options.sessionSpentUsd,
+    sessionBudgetUsd: options.sessionBudgetUsd,
+    permissions: options.permissions,
+    hookManager: options.hookManager,
+  });
   const coreMessages = toCoreMessages(messages);
 
   let content = '';
@@ -115,5 +158,15 @@ export async function runOrchestrator(
     }
   }
 
-  return { content, thinking, toolCallCount };
+  const usage = await result.usage;
+
+  return {
+    content,
+    thinking,
+    toolCallCount,
+    usage: {
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+    },
+  };
 }

@@ -3,13 +3,14 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel } from 'ai';
 
-export type ProviderId = 'anthropic' | 'openai' | 'google';
+export type ProviderId = 'anthropic' | 'openai' | 'google' | 'minimax';
 
 export interface ProviderConfig {
   providers: {
     anthropic?: { apiKey?: string };
     openai?: { apiKey?: string };
     google?: { apiKey?: string };
+    minimax?: { apiKey?: string };
   };
 }
 
@@ -24,6 +25,7 @@ export function detectProvider(modelId: string): ProviderId {
     return 'openai';
   }
   if (modelId.startsWith('gemini-')) return 'google';
+  if (modelId.startsWith('MiniMax-') || modelId.startsWith('minimax-')) return 'minimax';
   throw new Error(`Cannot determine provider for model: ${modelId}`);
 }
 
@@ -36,6 +38,7 @@ export class ProviderRegistry {
   private anthropicProvider: ReturnType<typeof createAnthropic> | null = null;
   private openaiProvider: ReturnType<typeof createOpenAI> | null = null;
   private googleProvider: ReturnType<typeof createGoogleGenerativeAI> | null = null;
+  private minimaxProvider: ReturnType<typeof createOpenAI> | null = null;
 
   constructor(config: ProviderConfig) {
     this.config = config;
@@ -81,6 +84,21 @@ export class ProviderRegistry {
           this.googleProvider = createGoogleGenerativeAI({ apiKey });
         }
         return this.googleProvider(modelId);
+      }
+      case 'minimax': {
+        if (!this.minimaxProvider) {
+          const apiKey = this.config.providers.minimax?.apiKey;
+          if (!apiKey) {
+            throw new Error(
+              'MiniMax API key not configured. Set providers.minimax.api_key in ~/.scrutari/config.yaml or export MINIMAX_API_KEY',
+            );
+          }
+          this.minimaxProvider = createOpenAI({
+            apiKey,
+            baseURL: 'https://api.minimax.io/v1',
+          });
+        }
+        return this.minimaxProvider.chat(modelId);
       }
     }
   }
