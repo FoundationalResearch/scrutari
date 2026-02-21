@@ -62,7 +62,8 @@ export function scanSkillFiles(
     const files = readdirSync(dir);
     for (const file of files) {
       if (file.endsWith('.yaml') || file.endsWith('.yml')) {
-        const name = basename(file).replace(/\.ya?ml$/, '');
+        // Strip .pipeline.yaml/.pipeline.yml first, then fall back to .yaml/.yml
+        const name = basename(file).replace(/\.pipeline\.ya?ml$/, '').replace(/\.ya?ml$/, '');
         results.push({ name, filePath: join(dir, file), source });
       }
     }
@@ -238,6 +239,67 @@ export function topologicalSort(skill: Skill): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// computeExecutionLevels — group stages into parallelizable levels
+// ---------------------------------------------------------------------------
+
+/**
+ * Groups stages into parallelizable "levels" using modified Kahn's algorithm.
+ * All stages in the same level have no dependencies on each other and can
+ * run concurrently. Within each level, stages are stable-sorted by YAML order.
+ *
+ * Example: a linear chain [a → b → c] produces [[a], [b], [c]].
+ * A diamond [a → b, a → c, b+c → d] produces [[a], [b, c], [d]].
+ */
+export function computeExecutionLevels(skill: Skill): string[][] {
+  const inDegree = new Map<string, number>();
+  const adjacency = new Map<string, string[]>();
+  const stageOrder = new Map(skill.stages.map((s, i) => [s.name, i]));
+
+  for (const stage of skill.stages) {
+    inDegree.set(stage.name, 0);
+    adjacency.set(stage.name, []);
+  }
+
+  // Build graph: if stage B has input_from [A], then A → B
+  for (const stage of skill.stages) {
+    if (stage.input_from) {
+      for (const dep of stage.input_from) {
+        adjacency.get(dep)?.push(stage.name);
+        inDegree.set(stage.name, (inDegree.get(stage.name) ?? 0) + 1);
+      }
+    }
+  }
+
+  const levels: string[][] = [];
+  let remaining = new Set(skill.stages.map(s => s.name));
+
+  while (remaining.size > 0) {
+    // Collect all zero-in-degree nodes as one level
+    const level: string[] = [];
+    for (const name of remaining) {
+      if ((inDegree.get(name) ?? 0) === 0) {
+        level.push(name);
+      }
+    }
+
+    // Stable sort by original YAML order
+    level.sort((a, b) => (stageOrder.get(a) ?? 0) - (stageOrder.get(b) ?? 0));
+
+    // Remove level nodes and decrement successors' in-degrees
+    for (const name of level) {
+      remaining.delete(name);
+      for (const successor of adjacency.get(name) ?? []) {
+        inDegree.set(successor, (inDegree.get(successor) ?? 1) - 1);
+      }
+    }
+
+    levels.push(level);
+  }
+
+  return levels;
+}
+
+// ---------------------------------------------------------------------------
 // substituteVariables — replace {varName} in templates
 // ---------------------------------------------------------------------------
 
@@ -252,6 +314,45 @@ export function substituteVariables(
     if (Array.isArray(value)) return value.join(', ');
     return String(value);
   });
+}
+
+// ---------------------------------------------------------------------------
+// validateSubPipelineRefs — DFS cycle detection across skill references
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates that sub_pipeline references don't create circular dependencies.
+ * Uses DFS cycle detection across skill boundaries.
+ *
+ * @param skill The skill to validate
+ * @param loadSkill Function to resolve skill name → SkillEntry
+ * @param visited Set of already-visited skill names (for cycle detection)
+ */
+export function validateSubPipelineRefs(
+  skill: Skill,
+  loadSkill: (name: string) => SkillEntry | undefined,
+  visited: Set<string> = new Set(),
+): void {
+  if (visited.has(skill.name)) {
+    throw new SkillCycleError(
+      `Circular sub_pipeline reference detected: ${[...visited, skill.name].join(' → ')}`,
+      [...visited, skill.name],
+    );
+  }
+
+  visited.add(skill.name);
+
+  for (const stage of skill.stages) {
+    if (stage.sub_pipeline) {
+      const entry = loadSkill(stage.sub_pipeline);
+      if (!entry) {
+        throw new SkillLoadError(
+          `Stage "${stage.name}" references unknown sub_pipeline "${stage.sub_pipeline}"`,
+        );
+      }
+      validateSubPipelineRefs(entry.skill, loadSkill, new Set(visited));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

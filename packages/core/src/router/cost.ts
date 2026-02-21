@@ -18,6 +18,9 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   'gemini-2.5-pro':                 { inputPerMillion: 1.25, outputPerMillion: 10.0 },
   'gemini-2.5-flash':               { inputPerMillion: 0.15, outputPerMillion: 0.60 },
   'gemini-2.0-flash':               { inputPerMillion: 0.10, outputPerMillion: 0.40 },
+  // MiniMax
+  'MiniMax-M2':                     { inputPerMillion: 0.30, outputPerMillion: 1.20 },
+  'MiniMax-M2-Stable':              { inputPerMillion: 0.30, outputPerMillion: 1.20 },
 };
 
 // Conservative fallback pricing (sonnet-level) for unknown models
@@ -34,10 +37,16 @@ export function calculateCost(model: string, inputTokens: number, outputTokens: 
 
 export class CostTracker {
   private _spent = 0;
+  private _reserved = 0;
   private _calls = 0;
 
   get totalSpent(): number {
     return this._spent;
+  }
+
+  /** Total committed cost: spent + reserved (for parallel budget safety). */
+  get totalCommitted(): number {
+    return this._spent + this._reserved;
   }
 
   get totalCalls(): number {
@@ -49,14 +58,36 @@ export class CostTracker {
     this._calls++;
   }
 
+  /**
+   * Reserve estimated cost before starting an agent.
+   * Throws BudgetExceededError if committed (spent + reserved) would exceed budget.
+   */
+  reserve(estimatedCost: number, maxCostUsd: number): void {
+    if (this._spent + this._reserved + estimatedCost > maxCostUsd) {
+      throw new BudgetExceededError(this._spent + this._reserved + estimatedCost, maxCostUsd);
+    }
+    this._reserved += estimatedCost;
+  }
+
+  /**
+   * Finalize a reservation: swap the reserved amount for the actual cost.
+   * Call after an agent completes to release its reservation and record actual spend.
+   */
+  finalize(reservedAmount: number, actualCost: number): void {
+    this._reserved = Math.max(0, this._reserved - reservedAmount);
+    this._spent += actualCost;
+    this._calls++;
+  }
+
   checkBudget(maxCostUsd: number): void {
-    if (this._spent >= maxCostUsd) {
-      throw new BudgetExceededError(this._spent, maxCostUsd);
+    if (this.totalCommitted >= maxCostUsd) {
+      throw new BudgetExceededError(this.totalCommitted, maxCostUsd);
     }
   }
 
   reset(): void {
     this._spent = 0;
+    this._reserved = 0;
     this._calls = 0;
   }
 }

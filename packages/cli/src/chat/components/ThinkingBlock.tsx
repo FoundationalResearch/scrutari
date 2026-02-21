@@ -15,11 +15,12 @@ export function ThinkingBlock({ content, verbose }: ThinkingBlockProps): React.R
 
   return (
     <Box flexDirection="column" marginLeft={2} marginBottom={0}>
+      <Text color="yellow" dimColor bold>Reasoning:</Text>
       {displayLines.map((line, i) => (
         <Text key={i} color="yellow" dimColor>{line}</Text>
       ))}
       {truncated && (
-        <Text color="yellow" dimColor>... ({lines.length - 2} more lines)</Text>
+        <Text color="yellow" dimColor>... ({lines.length - 2} more lines, use --verbose to see all)</Text>
       )}
     </Box>
   );

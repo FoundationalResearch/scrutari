@@ -106,6 +106,9 @@ function applyEnvVarFallbacks(config: Config): void {
   if (isUnresolvedEnvRef(config.providers.google.api_key)) {
     config.providers.google.api_key = undefined;
   }
+  if (isUnresolvedEnvRef(config.providers.minimax.api_key)) {
+    config.providers.minimax.api_key = undefined;
+  }
 
   // Apply env var fallbacks
   if (!config.providers.anthropic.api_key) {
@@ -124,6 +127,12 @@ function applyEnvVarFallbacks(config: Config): void {
     const envKey = process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY'];
     if (envKey) {
       config.providers.google.api_key = envKey;
+    }
+  }
+  if (!config.providers.minimax.api_key) {
+    const envKey = process.env['MINIMAX_API_KEY'];
+    if (envKey) {
+      config.providers.minimax.api_key = envKey;
     }
   }
 }
@@ -187,10 +196,25 @@ export function loadConfigWithMeta(options: LoadConfigOptions = {}): LoadConfigR
           anthropic: { ...result.providers.anthropic, ...validated.data.providers.anthropic },
           openai: { ...result.providers.openai, ...validated.data.providers.openai },
           google: { ...result.providers.google, ...validated.data.providers.google },
+          minimax: { ...result.providers.minimax, ...validated.data.providers.minimax },
         };
       }
       if (validated.data.mcp?.servers) {
         result.mcp.servers = [...result.mcp.servers, ...validated.data.mcp.servers];
+      }
+      if (validated.data.agents) {
+        result.agents = {
+          research: { ...result.agents.research, ...validated.data.agents.research },
+          explore: { ...result.agents.explore, ...validated.data.agents.explore },
+          verify: { ...result.agents.verify, ...validated.data.agents.verify },
+          default: { ...result.agents.default, ...validated.data.agents.default },
+        };
+      }
+      if (validated.data.compaction) {
+        result.compaction = { ...result.compaction, ...validated.data.compaction };
+      }
+      if (validated.data.permissions) {
+        result.permissions = { ...result.permissions, ...validated.data.permissions };
       }
     }
   }
@@ -209,6 +233,9 @@ export function loadConfigWithMeta(options: LoadConfigOptions = {}): LoadConfigR
     } else if (process.env['GOOGLE_API_KEY']) {
       envKeysUsed.push('GOOGLE_API_KEY');
     }
+  }
+  if (!result.providers.minimax.api_key && process.env['MINIMAX_API_KEY']) {
+    envKeysUsed.push('MINIMAX_API_KEY');
   }
 
   applyEnvVarFallbacks(result);

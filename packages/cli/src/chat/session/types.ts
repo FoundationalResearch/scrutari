@@ -7,6 +7,8 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   totalCostUsd: number;
+  compactionBoundary?: number;
+  compactionCount?: number;
 }
 
 export interface SessionSummary {

@@ -5,6 +5,7 @@ export {
   type ToolSource,
   type ToolConfig,
   type ToolGroup,
+  type HookEmitter,
 } from './types.js';
 
 export { ToolRegistry, getToolRegistry, resetToolRegistry } from './registry.js';

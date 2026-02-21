@@ -1,5 +1,6 @@
 import { loadAllSkills } from './loader.js';
-import type { SkillEntry } from './types.js';
+import { scanAgentSkillSummaries, loadAgentSkill } from './agent-loader.js';
+import type { SkillEntry, AgentSkill, AgentSkillSummary } from './types.js';
 
 export class SkillRegistry {
   private readonly _skills = new Map<string, SkillEntry>();
@@ -41,5 +42,56 @@ export class SkillRegistry {
     for (const entry of entries) {
       this.register(entry);
     }
+  }
+}
+
+export class AgentSkillRegistry {
+  private readonly _summaries = new Map<string, AgentSkillSummary>();
+  private readonly _loaded = new Map<string, AgentSkill>();
+
+  get size(): number {
+    return this._summaries.size;
+  }
+
+  loadSummariesFrom(options: { builtInDir: string; userDir?: string }): void {
+    const summaries = scanAgentSkillSummaries(options.builtInDir, options.userDir);
+    for (const summary of summaries) {
+      this._summaries.set(summary.name, summary);
+    }
+  }
+
+  getSummary(name: string): AgentSkillSummary | undefined {
+    return this._summaries.get(name);
+  }
+
+  listSummaries(): AgentSkillSummary[] {
+    return [...this._summaries.values()];
+  }
+
+  load(name: string): AgentSkill | undefined {
+    // Return cached if already loaded
+    if (this._loaded.has(name)) {
+      return this._loaded.get(name);
+    }
+
+    const summary = this._summaries.get(name);
+    if (!summary) return undefined;
+
+    const skill = loadAgentSkill(summary.dirPath, summary.source);
+    this._loaded.set(name, skill);
+    return skill;
+  }
+
+  has(name: string): boolean {
+    return this._summaries.has(name);
+  }
+
+  names(): string[] {
+    return [...this._summaries.keys()];
+  }
+
+  clear(): void {
+    this._summaries.clear();
+    this._loaded.clear();
   }
 }

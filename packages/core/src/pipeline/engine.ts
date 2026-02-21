@@ -1,15 +1,17 @@
 import { EventEmitter } from 'eventemitter3';
-import type { ToolSet } from 'ai';
-import { CostTracker, BudgetExceededError } from '../router/cost.js';
+import { CostTracker } from '../router/cost.js';
 import { ProviderRegistry, type ProviderConfig } from '../router/providers.js';
-import { callLLM, streamLLM } from '../router/llm.js';
-import { BudgetExceededRetryError } from '../router/retry.js';
-import { topologicalSort, substituteVariables } from '../skills/loader.js';
-import type { Skill, SkillStage } from '../skills/types.js';
+import { computeExecutionLevels } from '../skills/loader.js';
+import type { Skill, SkillStage, SkillEntry } from '../skills/types.js';
+import { substituteVariables } from '../skills/loader.js';
 import { extractClaims } from '../verification/extractor.js';
 import { linkClaims } from '../verification/linker.js';
 import { generateReport } from '../verification/reporter.js';
 import type { VerificationReport } from '../verification/types.js';
+import { Semaphore } from './semaphore.js';
+import { resolveAgentType, getAgentDefaults, type AgentType, type AgentDefaults } from './agent-types.js';
+import { runTaskAgent } from './task-agent.js';
+import type { HookManager } from '../hooks/manager.js';
 
 // ---------------------------------------------------------------------------
 // Pipeline event types
@@ -20,6 +22,7 @@ export interface StageStartEvent {
   model: string;
   stageIndex: number;
   totalStages: number;
+  agentType?: AgentType;
 }
 
 export interface StageStreamEvent {
@@ -122,25 +125,39 @@ export interface PipelineContext {
   toolsConfig?: Record<string, Record<string, unknown>>;
   /** Abort signal for Ctrl+C / graceful shutdown. */
   abortSignal?: AbortSignal;
+  /** Maximum concurrent stage agents (default: 5). */
+  maxConcurrency?: number;
+  /** Per-agent-type config overrides from user config. */
+  agentConfig?: Partial<Record<AgentType, Partial<AgentDefaults>>>;
+  /** Optional: resolves skill name to SkillEntry for sub_pipeline stages */
+  loadSkill?: (name: string) => SkillEntry | undefined;
+  /** Optional: shared cost tracker (for sub-pipelines to share budget with parent) */
+  sharedCostTracker?: CostTracker;
+  /** Optional: hook manager for lifecycle hooks */
+  hookManager?: HookManager;
 }
 
 // ---------------------------------------------------------------------------
 // Pipeline engine
 // ---------------------------------------------------------------------------
 
-const MAX_TOOL_STEPS = 10;
+const DEFAULT_MAX_CONCURRENCY = 5;
+const MAX_SUB_PIPELINE_DEPTH = 5;
 
 export class PipelineEngine extends EventEmitter<PipelineEvents> {
   private readonly context: PipelineContext;
-  private readonly costTracker = new CostTracker();
+  private readonly costTracker: CostTracker;
   private readonly providers: ProviderRegistry;
   private readonly stageOutputs = new Map<string, string>();
   private _verificationReport?: VerificationReport;
+  private readonly depth: number;
 
-  constructor(context: PipelineContext) {
+  constructor(context: PipelineContext, depth = 0) {
     super();
     this.context = context;
+    this.costTracker = context.sharedCostTracker ?? new CostTracker();
     this.providers = new ProviderRegistry(context.providerConfig);
+    this.depth = depth;
   }
 
   get totalCost(): number {
@@ -161,84 +178,172 @@ export class PipelineEngine extends EventEmitter<PipelineEvents> {
     // Validate tool availability before execution
     this.validateToolAvailability();
 
-    const executionOrder = topologicalSort(skill);
+    // pre_pipeline hook (blocking — failure aborts pipeline)
+    if (this.context.hookManager?.hasHooks('pre_pipeline')) {
+      await this.context.hookManager.emit('pre_pipeline', {
+        skill_name: skill.name,
+        inputs: { ...inputs },
+      });
+    }
+
+    const levels = computeExecutionLevels(skill);
     const stageMap = new Map(skill.stages.map(s => [s.name, s]));
+    const totalStages = skill.stages.length;
     const pipelineStart = Date.now();
     let stagesCompleted = 0;
+    let globalStageIndex = 0;
     const failedStages: string[] = [];
     const skippedStages: string[] = [];
 
+    // Create fatal abort controller — combines with user's abort signal
+    const fatalController = new AbortController();
+    const combinedSignal = combineAbortSignals(this.context.abortSignal, fatalController.signal);
+
+    const semaphore = new Semaphore(this.context.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY);
+
     try {
-      for (let i = 0; i < executionOrder.length; i++) {
-        const stageName = executionOrder[i];
-        const stage = stageMap.get(stageName)!;
-
-        // Check abort signal before each stage
-        if (this.context.abortSignal?.aborted) {
-          skippedStages.push(stageName);
+      for (const level of levels) {
+        // Check if pipeline should stop
+        if (combinedSignal.aborted) {
+          for (const stageName of level) {
+            skippedStages.push(stageName);
+          }
           continue;
         }
 
-        // Skip stages whose dependencies failed
-        if (this.shouldSkipStage(stage, failedStages)) {
-          skippedStages.push(stageName);
-          this.emit('stage:error', {
-            stageName,
-            error: new Error(`Skipped: dependency stage(s) failed`),
+        // Partition level into runnable vs skipped stages
+        const runnableStages: Array<{ stage: SkillStage; stageIndex: number }> = [];
+        for (const stageName of level) {
+          const stage = stageMap.get(stageName)!;
+
+          if (combinedSignal.aborted) {
+            skippedStages.push(stageName);
+            continue;
+          }
+
+          if (this.shouldSkipStage(stage, failedStages)) {
+            skippedStages.push(stageName);
+            this.emit('stage:error', {
+              stageName,
+              error: new Error(`Skipped: dependency stage(s) failed`),
+            });
+            continue;
+          }
+
+          runnableStages.push({ stage, stageIndex: globalStageIndex++ });
+        }
+
+        // Run all stages in this level concurrently (bounded by semaphore)
+        const agentPromises = runnableStages.map(({ stage, stageIndex }) => {
+          const agentType = resolveAgentType(stage);
+          const agentDefaults = getAgentDefaults(agentType, this.context.agentConfig);
+
+          // Model resolution chain: modelOverride > stage.model > agentConfig > agentDefaults
+          const resolvedModel = modelOverride ?? stage.model ?? agentDefaults.model;
+
+          this.emit('stage:start', {
+            stageName: stage.name,
+            model: resolvedModel,
+            stageIndex,
+            totalStages,
+            agentType,
           });
-          continue;
-        }
 
-        const resolvedModel = modelOverride ?? stage.model ?? 'claude-sonnet-4-20250514';
+          const costBefore = this.costTracker.totalSpent;
 
-        this.emit('stage:start', {
-          stageName,
-          model: resolvedModel,
-          stageIndex: i,
-          totalStages: executionOrder.length,
+          // Take a read-only snapshot of current stage outputs
+          const priorOutputs: ReadonlyMap<string, string> = new Map(this.stageOutputs);
+
+          return semaphore.run(async () => {
+            // pre_stage hook (blocking — failure aborts stage)
+            if (this.context.hookManager?.hasHooks('pre_stage')) {
+              await this.context.hookManager.emit('pre_stage', {
+                stage_name: stage.name,
+                skill_name: skill.name,
+                model: resolvedModel,
+                stage_index: stageIndex,
+                total_stages: totalStages,
+              });
+            }
+
+            // Branch: sub_pipeline stages run a nested pipeline
+            if (stage.sub_pipeline) {
+              const outcome = await this.runSubPipeline(stage, combinedSignal);
+              return { stage, resolvedModel, outcome, costBefore };
+            }
+
+            const outcome = await runTaskAgent({
+              stage,
+              modelId: resolvedModel,
+              agentDefaults,
+              inputs,
+              priorOutputs,
+              costTracker: this.costTracker,
+              maxBudgetUsd,
+              providers: this.providers,
+              resolveTools: this.context.resolveTools,
+              abortSignal: combinedSignal,
+              emit: (event: string, data: unknown) => {
+                this.emit(event as keyof PipelineEvents, data as never);
+              },
+            });
+
+            return { stage, resolvedModel, outcome, costBefore };
+          });
         });
 
-        const stageStart = Date.now();
-        const costBefore = this.costTracker.totalSpent;
+        const results = await Promise.allSettled(agentPromises);
 
-        try {
-          const result = await this.executeStage(stage, resolvedModel, inputs, maxBudgetUsd);
-          const durationMs = Date.now() - stageStart;
-          const stageCost = this.costTracker.totalSpent - costBefore;
-
-          this.stageOutputs.set(stageName, result.content);
-          stagesCompleted++;
-
-          // Run verification pipeline on "verify" stages
-          if (this.isVerifyStage(stage)) {
-            await this.runVerification(stage);
+        // Process outcomes
+        for (const settled of results) {
+          if (settled.status === 'rejected') {
+            // Should not happen since runTaskAgent catches errors
+            continue;
           }
 
-          this.emit('stage:complete', {
-            stageName,
-            model: resolvedModel,
-            content: result.content,
-            durationMs,
-            costUsd: stageCost,
-            inputTokens: result.inputTokens,
-            outputTokens: result.outputTokens,
-          });
-        } catch (err) {
-          const error = err instanceof Error ? err : new Error(String(err));
-          this.emit('stage:error', { stageName, error });
+          const { stage, resolvedModel, outcome, costBefore } = settled.value;
 
-          // Budget exceeded or abort — stop the pipeline, return partial results
-          if (this.isFatalError(err)) {
-            failedStages.push(stageName);
-            // Mark remaining stages as skipped
-            for (let j = i + 1; j < executionOrder.length; j++) {
-              skippedStages.push(executionOrder[j]);
+          if (outcome.status === 'success') {
+            const { result } = outcome;
+            this.stageOutputs.set(stage.name, result.content);
+            stagesCompleted++;
+
+            const stageCost = this.costTracker.totalSpent - costBefore;
+
+            // Run verification pipeline on "verify" stages
+            if (resolveAgentType(stage) === 'verify') {
+              await this.runVerification(stage);
             }
-            break;
-          }
 
-          // Non-fatal stage failure — record and continue
-          failedStages.push(stageName);
+            this.emit('stage:complete', {
+              stageName: stage.name,
+              model: resolvedModel,
+              content: result.content,
+              durationMs: result.durationMs,
+              costUsd: stageCost,
+              inputTokens: result.inputTokens,
+              outputTokens: result.outputTokens,
+            });
+
+            // post_stage hook (non-blocking)
+            if (this.context.hookManager?.hasHooks('post_stage')) {
+              this.context.hookManager.emit('post_stage', {
+                stage_name: stage.name,
+                skill_name: skill.name,
+                tokens: result.inputTokens + result.outputTokens,
+                cost: stageCost,
+                duration_ms: result.durationMs,
+              }).catch(() => {});
+            }
+          } else {
+            // Error outcome
+            this.emit('stage:error', { stageName: stage.name, error: outcome.error });
+            failedStages.push(stage.name);
+
+            if (outcome.fatal) {
+              fatalController.abort();
+            }
+          }
         }
       }
 
@@ -254,6 +359,20 @@ export class PipelineEngine extends EventEmitter<PipelineEvents> {
       };
 
       this.emit('pipeline:complete', completeEvent);
+
+      // post_pipeline hook (non-blocking)
+      if (this.context.hookManager?.hasHooks('post_pipeline')) {
+        this.context.hookManager.emit('post_pipeline', {
+          skill_name: skill.name,
+          inputs: { ...inputs },
+          total_cost_usd: completeEvent.totalCostUsd,
+          total_duration_ms: completeEvent.totalDurationMs,
+          stages_completed: completeEvent.stagesCompleted,
+          primary_output: completeEvent.primaryOutput,
+          summary: completeEvent.primaryOutput.slice(0, 500),
+        }).catch(() => {});
+      }
+
       return completeEvent;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -262,172 +381,118 @@ export class PipelineEngine extends EventEmitter<PipelineEvents> {
     }
   }
 
+  /**
+   * Run a sub-pipeline for a stage that declares sub_pipeline.
+   * Loads the referenced skill, resolves sub_inputs from parent context,
+   * creates a nested PipelineEngine with shared budget, and forwards events.
+   */
+  private async runSubPipeline(
+    stage: SkillStage,
+    abortSignal: AbortSignal,
+  ): Promise<import('./task-agent.js').TaskAgentOutcome> {
+    if (this.depth >= MAX_SUB_PIPELINE_DEPTH) {
+      return {
+        status: 'error',
+        error: new Error(`Sub-pipeline depth limit (${MAX_SUB_PIPELINE_DEPTH}) exceeded at stage "${stage.name}"`),
+        fatal: true,
+      };
+    }
+
+    const { loadSkill } = this.context;
+    if (!loadSkill) {
+      return {
+        status: 'error',
+        error: new Error(`No loadSkill function provided — cannot resolve sub_pipeline "${stage.sub_pipeline}"`),
+        fatal: false,
+      };
+    }
+
+    const entry = loadSkill(stage.sub_pipeline!);
+    if (!entry) {
+      return {
+        status: 'error',
+        error: new Error(`Sub-pipeline skill "${stage.sub_pipeline}" not found`),
+        fatal: false,
+      };
+    }
+
+    // Resolve sub_inputs: substitute variables from parent's inputs + stageOutputs
+    const variableMap: Record<string, string | string[] | number | boolean> = {
+      ...this.context.inputs,
+    };
+    for (const [name, output] of this.stageOutputs) {
+      variableMap[name] = output;
+    }
+
+    const resolvedSubInputs: Record<string, string | string[] | number | boolean> = {};
+    if (stage.sub_inputs) {
+      for (const [key, template] of Object.entries(stage.sub_inputs)) {
+        resolvedSubInputs[key] = substituteVariables(template, variableMap);
+      }
+    }
+
+    const startTime = Date.now();
+
+    const subContext: PipelineContext = {
+      skill: entry.skill,
+      inputs: resolvedSubInputs,
+      modelOverride: this.context.modelOverride,
+      maxBudgetUsd: this.context.maxBudgetUsd,
+      providerConfig: this.context.providerConfig,
+      resolveTools: this.context.resolveTools,
+      isToolAvailable: this.context.isToolAvailable,
+      toolsConfig: this.context.toolsConfig,
+      abortSignal,
+      maxConcurrency: this.context.maxConcurrency,
+      agentConfig: this.context.agentConfig,
+      loadSkill: this.context.loadSkill,
+      sharedCostTracker: this.costTracker,
+      hookManager: this.context.hookManager,
+    };
+
+    const subEngine = new PipelineEngine(subContext, this.depth + 1);
+
+    // Forward sub-pipeline events with prefixed stage names
+    const prefix = stage.name;
+    subEngine.on('stage:start', (event) => {
+      this.emit('stage:start', { ...event, stageName: `${prefix}/${event.stageName}` });
+    });
+    subEngine.on('stage:stream', (event) => {
+      this.emit('stage:stream', { ...event, stageName: `${prefix}/${event.stageName}` });
+    });
+    subEngine.on('stage:complete', (event) => {
+      this.emit('stage:complete', { ...event, stageName: `${prefix}/${event.stageName}` });
+    });
+    subEngine.on('stage:error', (event) => {
+      this.emit('stage:error', { ...event, stageName: `${prefix}/${event.stageName}` });
+    });
+
+    try {
+      const result = await subEngine.run();
+      return {
+        status: 'success',
+        result: {
+          stageName: stage.name,
+          content: result.primaryOutput,
+          durationMs: Date.now() - startTime,
+          inputTokens: 0,
+          outputTokens: 0,
+          costUsd: 0,
+        },
+      };
+    } catch (err) {
+      return {
+        status: 'error',
+        error: err instanceof Error ? err : new Error(String(err)),
+        fatal: false,
+      };
+    }
+  }
+
   /** Check if a stage should be skipped because its dependencies failed. */
   private shouldSkipStage(stage: SkillStage, failedStages: string[]): boolean {
     if (!stage.input_from || stage.input_from.length === 0) return false;
     return stage.input_from.some(dep => failedStages.includes(dep));
-  }
-
-  /** Check if an error should stop the entire pipeline. */
-  private isFatalError(err: unknown): boolean {
-    if (err instanceof BudgetExceededError) return true;
-    if (err instanceof BudgetExceededRetryError) return true;
-    if (err instanceof Error && err.name === 'BudgetExceededError') return true;
-    if (err instanceof Error && err.name === 'BudgetExceededRetryError') return true;
-    if (err instanceof Error && err.name === 'AbortError') return true;
-    if (this.context.abortSignal?.aborted) return true;
-    return false;
-  }
-
-  private async executeStage(
-    stage: SkillStage,
-    modelId: string,
-    inputs: Record<string, string | string[] | number | boolean>,
-    maxBudgetUsd: number,
-  ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
-    // Build variable map from inputs + prior stage outputs
-    const variables: Record<string, string | string[] | number | boolean> = { ...inputs };
-    if (stage.input_from) {
-      for (const dep of stage.input_from) {
-        const depOutput = this.stageOutputs.get(dep);
-        if (depOutput) {
-          variables[dep] = depOutput;
-        }
-      }
-    }
-
-    const prompt = substituteVariables(stage.prompt, variables);
-
-    let systemPrompt = 'You are an expert financial analyst. Complete the following analysis task.';
-    if (stage.output_format) {
-      systemPrompt += ` Respond in ${stage.output_format} format.`;
-    }
-
-    // Include prior stage outputs as context
-    const priorContext = this.buildPriorContext(stage);
-
-    const model = this.providers.getModel(modelId);
-    const budget = { maxCostUsd: maxBudgetUsd, tracker: this.costTracker };
-    const messages = [
-      ...(priorContext ? [{ role: 'user' as const, content: priorContext }] : []),
-      { role: 'user' as const, content: prompt },
-    ];
-
-    // Resolve tools for this stage if available
-    const stageTools = this.resolveStageTools(stage);
-    const hasTools = stageTools !== undefined;
-
-    if (hasTools) {
-      // Stages with tools use non-streaming callLLM with tool call loop
-      return this.executeWithTools(stage, modelId, model, systemPrompt, messages, stageTools, budget);
-    }
-
-    // Stages without tools use streaming
-    const { stream, response } = streamLLM({
-      model,
-      modelId,
-      system: systemPrompt,
-      messages,
-      maxOutputTokens: stage.max_tokens,
-      temperature: stage.temperature,
-      budget,
-      abortSignal: this.context.abortSignal,
-    });
-
-    let fullContent = '';
-    for await (const chunk of stream) {
-      fullContent += chunk;
-      this.emit('stage:stream', { stageName: stage.name, chunk });
-    }
-
-    const llmResponse = await response;
-
-    return {
-      content: llmResponse.content || fullContent,
-      inputTokens: llmResponse.usage.inputTokens,
-      outputTokens: llmResponse.usage.outputTokens,
-    };
-  }
-
-  private async executeWithTools(
-    stage: SkillStage,
-    modelId: string,
-    model: ReturnType<ProviderRegistry['getModel']>,
-    systemPrompt: string,
-    messages: Array<{ role: 'user'; content: string }>,
-    tools: ToolSet,
-    budget: { maxCostUsd: number; tracker: CostTracker },
-  ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
-    let totalInputTokens = 0;
-    let totalOutputTokens = 0;
-    const conversationMessages = [...messages] as Array<{ role: string; content: string }>;
-    let finalContent = '';
-
-    for (let step = 0; step < MAX_TOOL_STEPS; step++) {
-      const response = await callLLM({
-        model,
-        modelId,
-        system: systemPrompt,
-        messages: conversationMessages as Array<{ role: 'user' | 'assistant'; content: string }>,
-        tools,
-        maxOutputTokens: stage.max_tokens,
-        temperature: stage.temperature,
-        budget,
-        abortSignal: this.context.abortSignal,
-      });
-
-      totalInputTokens += response.usage.inputTokens;
-      totalOutputTokens += response.usage.outputTokens;
-
-      // If no tool calls, we have the final text response
-      if (!response.toolCalls || response.toolCalls.length === 0) {
-        finalContent = response.content;
-        this.emit('stage:stream', { stageName: stage.name, chunk: response.content });
-        break;
-      }
-
-      // Process tool calls — the AI SDK auto-executes tools when they have execute()
-      // functions, so response.content will contain the final text after tool execution.
-      // However, if the model returned tool calls in its response, it means it wants
-      // to use tools. With AI SDK's generateText and tools that have execute(),
-      // the tool calls are already executed and results incorporated.
-      // The response.content is the final text after all tool rounds.
-      finalContent = response.content;
-      if (finalContent) {
-        this.emit('stage:stream', { stageName: stage.name, chunk: finalContent });
-        break;
-      }
-
-      // If no content yet after tool calls, add tool results to conversation for next round
-      const toolResultSummary = response.toolCalls
-        .map(tc => `[Tool ${tc.toolName}: called with ${JSON.stringify(tc.input)}]`)
-        .join('\n');
-      conversationMessages.push({ role: 'assistant', content: toolResultSummary });
-      conversationMessages.push({
-        role: 'user',
-        content: 'Continue with the analysis based on the tool results above.',
-      });
-
-      this.emit('stage:stream', {
-        stageName: stage.name,
-        chunk: `\n[Using tools: ${response.toolCalls.map(tc => tc.toolName).join(', ')}]\n`,
-      });
-    }
-
-    return {
-      content: finalContent,
-      inputTokens: totalInputTokens,
-      outputTokens: totalOutputTokens,
-    };
-  }
-
-  private resolveStageTools(stage: SkillStage): ToolSet | undefined {
-    if (!stage.tools || stage.tools.length === 0 || !this.context.resolveTools) {
-      return undefined;
-    }
-    const toolMap = this.context.resolveTools(stage.tools);
-    if (Object.keys(toolMap).length === 0) return undefined;
-    return toolMap as ToolSet;
   }
 
   /**
@@ -461,14 +526,6 @@ export class PipelineEngine extends EventEmitter<PipelineEvents> {
         `Ensure the tools are configured and accessible.`,
       );
     }
-  }
-
-  /**
-   * Detect whether a stage is a verification stage.
-   * A stage is a verify stage if its name is "verify" or contains "verify".
-   */
-  private isVerifyStage(stage: SkillStage): boolean {
-    return stage.name === 'verify' || stage.name.includes('verify');
   }
 
   /**
@@ -536,17 +593,40 @@ export class PipelineEngine extends EventEmitter<PipelineEvents> {
       // The verify stage output itself (from the LLM) is still available
     }
   }
+}
 
-  private buildPriorContext(stage: SkillStage): string {
-    if (!stage.input_from || stage.input_from.length === 0) return '';
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-    const parts: string[] = [];
-    for (const dep of stage.input_from) {
-      const output = this.stageOutputs.get(dep);
-      if (output) {
-        parts.push(`--- Output from "${dep}" stage ---\n${output}`);
-      }
-    }
-    return parts.join('\n\n');
+/**
+ * Combine two optional AbortSignals into one. Either aborting triggers the combined signal.
+ */
+function combineAbortSignals(
+  userSignal?: AbortSignal,
+  fatalSignal?: AbortSignal,
+): AbortSignal {
+  if (!userSignal && !fatalSignal) {
+    return new AbortController().signal;
   }
+  if (!userSignal) return fatalSignal!;
+  if (!fatalSignal) return userSignal;
+
+  const controller = new AbortController();
+
+  const abort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
+  };
+
+  if (userSignal.aborted || fatalSignal.aborted) {
+    controller.abort();
+    return controller.signal;
+  }
+
+  userSignal.addEventListener('abort', abort, { once: true });
+  fatalSignal.addEventListener('abort', abort, { once: true });
+
+  return controller.signal;
 }

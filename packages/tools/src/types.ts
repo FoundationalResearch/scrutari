@@ -48,3 +48,12 @@ export interface ToolGroup {
   /** All tool definitions in this group */
   tools: ToolDefinition[];
 }
+
+/**
+ * Minimal interface for hook emission, avoiding circular dependency on @scrutari/core.
+ * HookManager naturally implements this interface.
+ */
+export interface HookEmitter {
+  hasHooks(event: string): boolean;
+  emit(event: string, context: Record<string, unknown>): Promise<unknown[]>;
+}

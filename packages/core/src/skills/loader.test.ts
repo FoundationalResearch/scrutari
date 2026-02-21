@@ -7,8 +7,10 @@ import {
   parseSkillFile,
   validateDAG,
   topologicalSort,
+  computeExecutionLevels,
   substituteVariables,
   loadAllSkills,
+  validateSubPipelineRefs,
   SkillLoadError,
   SkillValidationError,
   SkillCycleError,
@@ -270,6 +272,97 @@ describe('topologicalSort', () => {
 });
 
 // ---------------------------------------------------------------------------
+// computeExecutionLevels
+// ---------------------------------------------------------------------------
+
+describe('computeExecutionLevels', () => {
+  it('returns single-element levels for a linear chain', () => {
+    const skill: Skill = {
+      name: 'test',
+      description: 'test',
+      stages: [
+        { name: 'a', prompt: 'test' },
+        { name: 'b', prompt: 'test', input_from: ['a'] },
+        { name: 'c', prompt: 'test', input_from: ['b'] },
+      ],
+      output: { primary: 'c' },
+    };
+    expect(computeExecutionLevels(skill)).toEqual([['a'], ['b'], ['c']]);
+  });
+
+  it('groups independent stages into one level', () => {
+    const skill: Skill = {
+      name: 'test',
+      description: 'test',
+      stages: [
+        { name: 'a', prompt: 'test' },
+        { name: 'b', prompt: 'test' },
+        { name: 'c', prompt: 'test' },
+      ],
+      output: { primary: 'a' },
+    };
+    expect(computeExecutionLevels(skill)).toEqual([['a', 'b', 'c']]);
+  });
+
+  it('handles diamond dependency', () => {
+    const skill: Skill = {
+      name: 'test',
+      description: 'test',
+      stages: [
+        { name: 'a', prompt: 'test' },
+        { name: 'b', prompt: 'test', input_from: ['a'] },
+        { name: 'c', prompt: 'test', input_from: ['a'] },
+        { name: 'd', prompt: 'test', input_from: ['b', 'c'] },
+      ],
+      output: { primary: 'd' },
+    };
+    const levels = computeExecutionLevels(skill);
+    expect(levels).toEqual([['a'], ['b', 'c'], ['d']]);
+  });
+
+  it('handles mixed independent and dependent stages', () => {
+    const skill: Skill = {
+      name: 'test',
+      description: 'test',
+      stages: [
+        { name: 'gather_a', prompt: 'test' },
+        { name: 'gather_b', prompt: 'test' },
+        { name: 'merge', prompt: 'test', input_from: ['gather_a', 'gather_b'] },
+        { name: 'format', prompt: 'test', input_from: ['merge'] },
+      ],
+      output: { primary: 'format' },
+    };
+    const levels = computeExecutionLevels(skill);
+    expect(levels).toEqual([['gather_a', 'gather_b'], ['merge'], ['format']]);
+  });
+
+  it('preserves YAML order within a level', () => {
+    const skill: Skill = {
+      name: 'test',
+      description: 'test',
+      stages: [
+        { name: 'z_stage', prompt: 'test' },
+        { name: 'a_stage', prompt: 'test' },
+        { name: 'm_stage', prompt: 'test' },
+      ],
+      output: { primary: 'z_stage' },
+    };
+    // Even though alphabetically a < m < z, YAML order is z, a, m
+    expect(computeExecutionLevels(skill)).toEqual([['z_stage', 'a_stage', 'm_stage']]);
+  });
+
+  it('handles single-stage skill', () => {
+    const skill: Skill = {
+      name: 'test',
+      description: 'test',
+      stages: [{ name: 'only', prompt: 'test' }],
+      output: { primary: 'only' },
+    };
+    expect(computeExecutionLevels(skill)).toEqual([['only']]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // substituteVariables
 // ---------------------------------------------------------------------------
 
@@ -332,5 +425,187 @@ describe('loadAllSkills', () => {
     const skills = loadAllSkills({ builtInDir, userDir });
     expect(skills).toHaveLength(2);
     expect(skills.map(s => s.skill.name).sort()).toEqual(['skill-a', 'skill-b']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateSubPipelineRefs
+// ---------------------------------------------------------------------------
+
+describe('validateSubPipelineRefs', () => {
+  it('passes for a skill with no sub_pipeline references', () => {
+    const skill: Skill = {
+      name: 'simple',
+      description: 'A simple skill',
+      stages: [
+        { name: 'stage1', prompt: 'Do something' },
+        { name: 'stage2', prompt: 'Do more', input_from: ['stage1'] },
+      ],
+      output: { primary: 'stage2' },
+    };
+
+    const loadSkill = () => undefined;
+    expect(() => validateSubPipelineRefs(skill, loadSkill)).not.toThrow();
+  });
+
+  it('passes for a valid sub_pipeline reference', () => {
+    const childSkill: Skill = {
+      name: 'child-skill',
+      description: 'Child skill',
+      stages: [{ name: 's1', prompt: 'Child work' }],
+      output: { primary: 's1' },
+    };
+
+    const parentSkill: Skill = {
+      name: 'parent-skill',
+      description: 'Parent skill',
+      stages: [
+        { name: 'gather', prompt: 'Gather data' },
+        { name: 'delegate', sub_pipeline: 'child-skill', input_from: ['gather'] },
+      ],
+      output: { primary: 'delegate' },
+    };
+
+    const loadSkill = (name: string) => {
+      if (name === 'child-skill') {
+        return { skill: childSkill, filePath: '/skills/child-skill.yaml', source: 'built-in' as const };
+      }
+      return undefined;
+    };
+
+    expect(() => validateSubPipelineRefs(parentSkill, loadSkill)).not.toThrow();
+  });
+
+  it('throws SkillCycleError for circular sub_pipeline reference', () => {
+    const skillA: Skill = {
+      name: 'skill-a',
+      description: 'Skill A',
+      stages: [{ name: 's1', sub_pipeline: 'skill-b' }],
+      output: { primary: 's1' },
+    };
+
+    const skillB: Skill = {
+      name: 'skill-b',
+      description: 'Skill B',
+      stages: [{ name: 's1', sub_pipeline: 'skill-a' }],
+      output: { primary: 's1' },
+    };
+
+    const loadSkill = (name: string) => {
+      if (name === 'skill-a') {
+        return { skill: skillA, filePath: '/skills/skill-a.yaml', source: 'built-in' as const };
+      }
+      if (name === 'skill-b') {
+        return { skill: skillB, filePath: '/skills/skill-b.yaml', source: 'built-in' as const };
+      }
+      return undefined;
+    };
+
+    expect(() => validateSubPipelineRefs(skillA, loadSkill)).toThrow(SkillCycleError);
+  });
+
+  it('throws SkillLoadError for missing sub_pipeline reference', () => {
+    const skill: Skill = {
+      name: 'parent',
+      description: 'Parent',
+      stages: [{ name: 's1', sub_pipeline: 'nonexistent-skill' }],
+      output: { primary: 's1' },
+    };
+
+    const loadSkill = () => undefined;
+
+    expect(() => validateSubPipelineRefs(skill, loadSkill)).toThrow(SkillLoadError);
+    expect(() => validateSubPipelineRefs(skill, loadSkill)).toThrow(/nonexistent-skill/);
+  });
+
+  it('throws SkillCycleError for self-referencing sub_pipeline', () => {
+    const skill: Skill = {
+      name: 'self-ref',
+      description: 'Self referencing',
+      stages: [{ name: 's1', sub_pipeline: 'self-ref' }],
+      output: { primary: 's1' },
+    };
+
+    const loadSkill = (name: string) => {
+      if (name === 'self-ref') {
+        return { skill, filePath: '/skills/self-ref.yaml', source: 'built-in' as const };
+      }
+      return undefined;
+    };
+
+    expect(() => validateSubPipelineRefs(skill, loadSkill)).toThrow(SkillCycleError);
+  });
+
+  it('throws SkillCycleError for 3-level circular sub_pipeline reference', () => {
+    const skillA: Skill = {
+      name: 'skill-a',
+      description: 'Skill A',
+      stages: [{ name: 's1', sub_pipeline: 'skill-b' }],
+      output: { primary: 's1' },
+    };
+
+    const skillB: Skill = {
+      name: 'skill-b',
+      description: 'Skill B',
+      stages: [{ name: 's1', sub_pipeline: 'skill-c' }],
+      output: { primary: 's1' },
+    };
+
+    const skillC: Skill = {
+      name: 'skill-c',
+      description: 'Skill C',
+      stages: [{ name: 's1', sub_pipeline: 'skill-a' }],
+      output: { primary: 's1' },
+    };
+
+    const loadSkill = (name: string) => {
+      const map: Record<string, Skill> = {
+        'skill-a': skillA,
+        'skill-b': skillB,
+        'skill-c': skillC,
+      };
+      if (map[name]) {
+        return { skill: map[name], filePath: `/skills/${name}.yaml`, source: 'built-in' as const };
+      }
+      return undefined;
+    };
+
+    expect(() => validateSubPipelineRefs(skillA, loadSkill)).toThrow(SkillCycleError);
+  });
+
+  it('passes for a deep non-circular sub_pipeline chain', () => {
+    const skillC: Skill = {
+      name: 'skill-c',
+      description: 'Leaf skill',
+      stages: [{ name: 's1', prompt: 'Leaf work' }],
+      output: { primary: 's1' },
+    };
+
+    const skillB: Skill = {
+      name: 'skill-b',
+      description: 'Middle skill',
+      stages: [{ name: 's1', sub_pipeline: 'skill-c' }],
+      output: { primary: 's1' },
+    };
+
+    const skillA: Skill = {
+      name: 'skill-a',
+      description: 'Top skill',
+      stages: [{ name: 's1', sub_pipeline: 'skill-b' }],
+      output: { primary: 's1' },
+    };
+
+    const loadSkill = (name: string) => {
+      const map: Record<string, Skill> = {
+        'skill-b': skillB,
+        'skill-c': skillC,
+      };
+      if (map[name]) {
+        return { skill: map[name], filePath: `/skills/${name}.yaml`, source: 'built-in' as const };
+      }
+      return undefined;
+    };
+
+    expect(() => validateSubPipelineRefs(skillA, loadSkill)).not.toThrow();
   });
 });

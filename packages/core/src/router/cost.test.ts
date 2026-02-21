@@ -51,6 +51,18 @@ describe('getModelPricing', () => {
     expect(pricing.outputPerMillion).toBe(0.40);
   });
 
+  it('returns known pricing for MiniMax-M2', () => {
+    const pricing = getModelPricing('MiniMax-M2');
+    expect(pricing.inputPerMillion).toBe(0.30);
+    expect(pricing.outputPerMillion).toBe(1.20);
+  });
+
+  it('returns known pricing for MiniMax-M2-Stable', () => {
+    const pricing = getModelPricing('MiniMax-M2-Stable');
+    expect(pricing.inputPerMillion).toBe(0.30);
+    expect(pricing.outputPerMillion).toBe(1.20);
+  });
+
   it('has pricing for all expected models', () => {
     const expected = [
       'claude-opus-4-20250514',
@@ -63,6 +75,8 @@ describe('getModelPricing', () => {
       'gemini-2.5-pro',
       'gemini-2.5-flash',
       'gemini-2.0-flash',
+      'MiniMax-M2',
+      'MiniMax-M2-Stable',
     ];
     for (const model of expected) {
       expect(MODEL_PRICING[model]).toBeDefined();
@@ -142,6 +156,72 @@ describe('CostTracker', () => {
     const tracker = new CostTracker();
     tracker.addCost(5.0);
     expect(() => tracker.checkBudget(5.0)).toThrow(BudgetExceededError);
+  });
+
+  // --- Reservation API ---
+
+  it('totalCommitted includes spent + reserved', () => {
+    const tracker = new CostTracker();
+    tracker.addCost(1.0);
+    tracker.reserve(0.5, 5.0);
+    expect(tracker.totalSpent).toBe(1.0);
+    expect(tracker.totalCommitted).toBeCloseTo(1.5, 6);
+  });
+
+  it('reserve throws when committed would exceed budget', () => {
+    const tracker = new CostTracker();
+    tracker.addCost(4.0);
+    expect(() => tracker.reserve(1.5, 5.0)).toThrow(BudgetExceededError);
+  });
+
+  it('reserve succeeds when within budget', () => {
+    const tracker = new CostTracker();
+    tracker.addCost(3.0);
+    expect(() => tracker.reserve(1.5, 5.0)).not.toThrow();
+    expect(tracker.totalCommitted).toBeCloseTo(4.5, 6);
+  });
+
+  it('finalize swaps reservation for actual cost', () => {
+    const tracker = new CostTracker();
+    tracker.reserve(2.0, 5.0);
+    expect(tracker.totalCommitted).toBeCloseTo(2.0, 6);
+
+    tracker.finalize(2.0, 1.5);
+    expect(tracker.totalSpent).toBeCloseTo(1.5, 6);
+    expect(tracker.totalCommitted).toBeCloseTo(1.5, 6);
+    expect(tracker.totalCalls).toBe(1);
+  });
+
+  it('finalize clamps reserved to zero when over-releasing', () => {
+    const tracker = new CostTracker();
+    tracker.reserve(1.0, 5.0);
+    tracker.finalize(5.0, 0.5); // Release more than reserved
+    expect(tracker.totalSpent).toBeCloseTo(0.5, 6);
+    expect(tracker.totalCommitted).toBeCloseTo(0.5, 6); // reserved is clamped to 0
+  });
+
+  it('checkBudget considers reserved amounts', () => {
+    const tracker = new CostTracker();
+    tracker.addCost(3.0);
+    tracker.reserve(2.0, 5.0);
+    expect(() => tracker.checkBudget(5.0)).toThrow(BudgetExceededError);
+  });
+
+  it('reset clears reservations too', () => {
+    const tracker = new CostTracker();
+    tracker.addCost(1.0);
+    tracker.reserve(2.0, 5.0);
+    tracker.reset();
+    expect(tracker.totalSpent).toBe(0);
+    expect(tracker.totalCommitted).toBe(0);
+    expect(tracker.totalCalls).toBe(0);
+  });
+
+  it('multiple reserves accumulate', () => {
+    const tracker = new CostTracker();
+    tracker.reserve(1.0, 5.0);
+    tracker.reserve(1.5, 5.0);
+    expect(tracker.totalCommitted).toBeCloseTo(2.5, 6);
   });
 });
 

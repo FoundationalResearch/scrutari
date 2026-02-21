@@ -5,12 +5,20 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import type { Config } from '../../config/index.js';
 import { setConfigValue } from '../../config/index.js';
+import { resolvePermission } from './permissions.js';
 import {
   PipelineEngine,
   loadSkillFile,
   scanSkillFiles,
+  scanSkillSummaries,
+  estimatePipelineCost,
+  loadAgentSkill,
+  readAgentSkillResource,
   type PipelineContext,
   type SkillEntry,
+  type AgentSkillSummary,
+  type AgentSkill,
+  type HookManager,
 } from '@scrutari/core';
 import { ToolRegistry, type ToolContext, type ToolDefinition } from '@scrutari/tools';
 import { type MCPClientManager, type AdaptedToolDefinition } from '@scrutari/mcp';
@@ -85,7 +93,52 @@ function mcpToAISDKTools(mcpTools: AdaptedToolDefinition[]): Record<string, {
   return tools;
 }
 
-export function createOrchestratorTools(config: Config, orchestratorConfig: OrchestratorConfig, mcpClient?: MCPClientManager) {
+/**
+ * Build agent config map from CLI config for use with the estimator.
+ */
+function buildAgentConfigMap(config: Config): Record<string, { model?: string; maxTokens?: number; temperature?: number }> {
+  const map: Record<string, { model?: string; maxTokens?: number; temperature?: number }> = {};
+  for (const type of ['research', 'explore', 'verify', 'default'] as const) {
+    const entry = config.agents[type];
+    if (entry.model || entry.max_tokens || entry.temperature) {
+      map[type] = {
+        ...(entry.model ? { model: entry.model } : {}),
+        ...(entry.max_tokens ? { maxTokens: entry.max_tokens } : {}),
+        ...(entry.temperature !== undefined ? { temperature: entry.temperature } : {}),
+      };
+    }
+  }
+  return map;
+}
+
+/**
+ * Format a DAG visualization from execution levels.
+ */
+function formatDagVisualization(executionLevels: string[][]): string {
+  return executionLevels.map((level, i) =>
+    `Level ${i + 1}: ${level.join(' + ')}`
+  ).join('\n');
+}
+
+const READ_ONLY_TOOLS = new Set([
+  'get_quote', 'search_filings', 'search_news',
+  'list_skills', 'get_skill_detail', 'list_sessions',
+  'manage_config', 'preview_pipeline',
+]);
+
+export interface OrchestratorToolsOptions {
+  dryRun?: boolean;
+  readOnly?: boolean;
+  approvalThreshold?: number;
+  agentSkillSummaries?: AgentSkillSummary[];
+  activeAgentSkill?: AgentSkill;
+  sessionSpentUsd?: number;
+  sessionBudgetUsd?: number;
+  permissions?: Record<string, import('../../config/schema.js').PermissionLevel>;
+  hookManager?: HookManager;
+}
+
+export function createOrchestratorTools(config: Config, orchestratorConfig: OrchestratorConfig, mcpClient?: MCPClientManager, options: OrchestratorToolsOptions = {}) {
   const builtInDir = getBuiltInSkillsDir();
   const userDir = expandTilde(config.skills_dir);
 
@@ -94,7 +147,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
   const mcpOrchestratorTools = mcpToAISDKTools(mcpTools);
   const mcpToolDefinitions = mcpToToolDefinitions(mcpTools);
 
-  return {
+  const allTools = {
     run_pipeline: {
       description: 'Run a skill-based analysis pipeline. Pass inputs matching the skill\'s declared input schema.',
       inputSchema: z.object({
@@ -138,6 +191,63 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
           }
         }
 
+        const agentConfigMap = buildAgentConfigMap(config);
+        const agentConfig = Object.keys(agentConfigMap).length > 0 ? agentConfigMap : undefined;
+        const loadSkillFn = (n: string) => findSkill(n, builtInDir, userDir);
+        const estimate = estimatePipelineCost(skill, model, agentConfig, loadSkillFn);
+
+        // Dry-run: return estimate without executing
+        if (options.dryRun) {
+          return {
+            dryRun: true,
+            skillName: skillName,
+            inputs: resolvedInputs,
+            estimate: {
+              stages: estimate.stages.map(s => ({
+                name: s.stageName,
+                model: s.model,
+                agentType: s.agentType,
+                estimatedInputTokens: s.estimatedInputTokens,
+                estimatedOutputTokens: s.estimatedOutputTokens,
+                estimatedCostUsd: s.estimatedCostUsd,
+                estimatedTimeSeconds: s.estimatedTimeSeconds,
+                tools: s.tools,
+              })),
+              executionLevels: estimate.executionLevels,
+              totalEstimatedCostUsd: estimate.totalEstimatedCostUsd,
+              totalEstimatedTimeSeconds: estimate.totalEstimatedTimeSeconds,
+              toolsRequired: estimate.toolsRequired,
+              toolsOptional: estimate.toolsOptional,
+            },
+          };
+        }
+
+        // Pre-execution session budget enforcement
+        const sessionSpent = options.sessionSpentUsd ?? 0;
+        const sessionBudget = options.sessionBudgetUsd ?? Infinity;
+        const remaining = sessionBudget - sessionSpent;
+
+        if (estimate.totalEstimatedCostUsd > remaining) {
+          return {
+            error: `Estimated cost ($${estimate.totalEstimatedCostUsd.toFixed(4)}) exceeds remaining session budget ($${remaining.toFixed(4)}). Session spent: $${sessionSpent.toFixed(4)} of $${sessionBudget.toFixed(2)}.`,
+          };
+        }
+
+        // Approval gate: check if cost exceeds threshold
+        const approvalThreshold = options.approvalThreshold ?? config.defaults.approval_threshold_usd;
+        if (orchestratorConfig.onApprovalRequired) {
+          if (estimate.totalEstimatedCostUsd > approvalThreshold) {
+            const approved = await orchestratorConfig.onApprovalRequired(estimate);
+            if (!approved) {
+              return {
+                cancelled: true,
+                reason: 'User declined',
+                estimatedCost: estimate.totalEstimatedCostUsd,
+              };
+            }
+          }
+        }
+
         const toolRegistry = new ToolRegistry();
 
         // Register MCP tools so pipelines can reference MCP servers as tool groups
@@ -161,7 +271,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
 
         const resolveTools = (groupNames: string[]) => {
           const tools = toolRegistry.resolveToolGroups(groupNames);
-          return toolRegistry.toAISDKToolSet(tools, toolContext);
+          return toolRegistry.toAISDKToolSet(tools, toolContext, options.hookManager);
         };
 
         const pipelineContext: PipelineContext = {
@@ -180,6 +290,10 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
           isToolAvailable: (name: string) => toolRegistry.isAvailable(name),
           toolsConfig: skill.tools_config,
           abortSignal: orchestratorConfig.abortSignal,
+          maxConcurrency: 5,
+          agentConfig: Object.keys(agentConfigMap).length > 0 ? agentConfigMap : undefined,
+          loadSkill: (name: string) => findSkill(name, builtInDir, userDir),
+          hookManager: options.hookManager,
         };
 
         const pipeline = new PipelineEngine(pipelineContext);
@@ -248,32 +362,188 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
       },
     },
 
-    list_skills: {
-      description: 'List all available analysis skills.',
-      inputSchema: z.object({}),
-      execute: async () => {
-        const scanned = scanSkillFiles(builtInDir, userDir);
-        const skills = scanned.map(s => {
-          try {
-            const entry = loadSkillFile(s.filePath, s.source);
+    preview_pipeline: {
+      description: 'Preview a pipeline execution plan with real cost and time estimates, without executing it. Use this in plan mode instead of run_pipeline.',
+      inputSchema: z.object({
+        skill: z.string().default('deep-dive').describe('Analysis skill to preview'),
+        inputs: z.record(
+          z.string(),
+          z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+        ).describe('Skill inputs as key-value pairs'),
+        model: z.string().optional().describe('Override the model for all pipeline stages'),
+      }),
+      execute: async ({ skill: skillName, inputs: rawInputs, model }: {
+        skill: string;
+        inputs: Record<string, string | number | boolean | string[]>;
+        model?: string;
+      }) => {
+        const skillEntry = findSkill(skillName, builtInDir, userDir);
+        if (!skillEntry) {
+          return { error: `Skill "${skillName}" not found.` };
+        }
+
+        const skill = skillEntry.skill;
+
+        // Validate inputs
+        const declaredInputs = skill.inputs ?? [];
+        const resolvedInputs: Record<string, string | number | boolean | string[]> = {};
+        for (const decl of declaredInputs) {
+          const provided = rawInputs[decl.name];
+          if (provided !== undefined) {
+            resolvedInputs[decl.name] = provided;
+          } else if (decl.default !== undefined) {
+            resolvedInputs[decl.name] = decl.default;
+          } else if (decl.required) {
             return {
-              name: entry.skill.name,
-              description: entry.skill.description,
-              inputs: (entry.skill.inputs ?? []).map(i => ({
-                name: i.name,
-                type: i.type,
-                required: i.required,
-                ...(i.default !== undefined ? { default: i.default } : {}),
-                ...(i.description ? { description: i.description } : {}),
-              })),
-              stages: entry.skill.stages.map(st => st.name),
-              source: s.source,
+              error: `Missing required input "${decl.name}" for skill "${skillName}".`,
+            };
+          }
+        }
+
+        const agentConfigMap = buildAgentConfigMap(config);
+        const estimate = estimatePipelineCost(skill, model, Object.keys(agentConfigMap).length > 0 ? agentConfigMap : undefined, (n: string) => findSkill(n, builtInDir, userDir));
+
+        return {
+          preview: true,
+          skillName,
+          description: skill.description,
+          inputs: resolvedInputs,
+          stages: estimate.stages.map(s => ({
+            name: s.stageName,
+            model: s.model,
+            agentType: s.agentType,
+            estimatedCostUsd: s.estimatedCostUsd,
+            estimatedTimeSeconds: s.estimatedTimeSeconds,
+            tools: s.tools,
+          })),
+          executionLevels: estimate.executionLevels,
+          dagVisualization: formatDagVisualization(estimate.executionLevels),
+          totalEstimatedCostUsd: estimate.totalEstimatedCostUsd,
+          totalEstimatedTimeSeconds: estimate.totalEstimatedTimeSeconds,
+          toolsRequired: estimate.toolsRequired,
+          toolsOptional: estimate.toolsOptional,
+        };
+      },
+    },
+
+    list_skills: {
+      description: 'List all available analysis skills. Use detail=true for full info (slower).',
+      inputSchema: z.object({
+        detail: z.boolean().optional().default(false).describe('If true, load full skill details (inputs, stages). Default: false (fast summary).'),
+      }),
+      execute: async ({ detail }: { detail?: boolean }) => {
+        if (detail) {
+          const scanned = scanSkillFiles(builtInDir, userDir);
+          const skills = scanned.map(s => {
+            try {
+              const entry = loadSkillFile(s.filePath, s.source);
+              return {
+                name: entry.skill.name,
+                description: entry.skill.description,
+                inputs: (entry.skill.inputs ?? []).map(i => ({
+                  name: i.name,
+                  type: i.type,
+                  required: i.required,
+                  ...(i.default !== undefined ? { default: i.default } : {}),
+                  ...(i.description ? { description: i.description } : {}),
+                })),
+                stages: entry.skill.stages.map(st => st.name),
+                source: s.source,
+              };
+            } catch {
+              return { name: s.name, description: 'Failed to load', stages: [] as string[], source: s.source };
+            }
+          });
+
+          const agentSkills = (options.agentSkillSummaries ?? []).map(s => ({
+            name: s.name,
+            description: s.description,
+            kind: 'agent' as const,
+            source: s.source,
+          }));
+
+          return { pipelineSkills: skills, agentSkills };
+        }
+
+        // Fast path: summaries only
+        const summaries = scanSkillSummaries(builtInDir, userDir);
+        const agentSkills = (options.agentSkillSummaries ?? []).map(s => ({
+          name: s.name,
+          description: s.description,
+          kind: 'agent' as const,
+          source: s.source,
+        }));
+        return {
+          pipelineSkills: summaries.map(s => ({
+            name: s.name,
+            description: s.description,
+            source: s.source,
+          })),
+          agentSkills,
+        };
+      },
+    },
+
+    get_skill_detail: {
+      description: 'Get detailed information about a specific skill including inputs, stages, tools, and cost estimate.',
+      inputSchema: z.object({
+        name: z.string().describe('Skill name to get details for'),
+      }),
+      execute: async ({ name }: { name: string }) => {
+        // Check pipeline skills first
+        const skillEntry = findSkill(name, builtInDir, userDir);
+        if (skillEntry) {
+          const skill = skillEntry.skill;
+          const estimate = estimatePipelineCost(skill);
+
+          return {
+            name: skill.name,
+            description: skill.description,
+            kind: 'pipeline' as const,
+            source: skillEntry.source,
+            inputs: (skill.inputs ?? []).map(i => ({
+              name: i.name,
+              type: i.type,
+              required: i.required,
+              ...(i.default !== undefined ? { default: i.default } : {}),
+              ...(i.description ? { description: i.description } : {}),
+            })),
+            stages: skill.stages.map(st => ({
+              name: st.name,
+              description: st.description,
+              model: st.model,
+              tools: st.tools,
+              input_from: st.input_from,
+              sub_pipeline: st.sub_pipeline,
+            })),
+            tools_required: skill.tools_required,
+            tools_optional: skill.tools_optional,
+            estimatedCostUsd: estimate.totalEstimatedCostUsd,
+            executionLevels: estimate.executionLevels,
+          };
+        }
+
+        // Check agent skills
+        const agentSummary = (options.agentSkillSummaries ?? []).find(s => s.name === name);
+        if (agentSummary) {
+          try {
+            const agentSkill = loadAgentSkill(agentSummary.dirPath, agentSummary.source);
+            const bodyPreview = agentSkill.body.slice(0, 500);
+            return {
+              name: agentSkill.frontmatter.name,
+              description: agentSkill.frontmatter.description,
+              kind: 'agent' as const,
+              source: agentSummary.source,
+              bodyPreview,
+              bodyTokenEstimate: Math.ceil(agentSkill.body.length / 4),
+              hasPipeline: !!agentSkill.pipelineSkillPath,
             };
           } catch {
-            return { name: s.name, description: 'Failed to load', stages: [] as string[], source: s.source };
+            return { error: `Failed to load agent skill "${name}".` };
           }
-        });
-        return { skills };
+        }
+
+        return { error: `Skill "${name}" not found.` };
       },
     },
 
@@ -379,7 +649,107 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
       },
     },
 
+    activate_skill: {
+      description: 'Activate an agent skill to load its domain expertise into the conversation context. Only one agent skill can be active at a time.',
+      inputSchema: z.object({
+        name: z.string().describe('Agent skill name to activate'),
+      }),
+      execute: async ({ name }: { name: string }) => {
+        const agentSummary = (options.agentSkillSummaries ?? []).find(s => s.name === name);
+        if (!agentSummary) {
+          return { error: `Agent skill "${name}" not found. Use list_skills to see available agent skills.` };
+        }
+
+        try {
+          const skill = loadAgentSkill(agentSummary.dirPath, agentSummary.source);
+          if (orchestratorConfig.onAgentSkillActivated) {
+            orchestratorConfig.onAgentSkillActivated(skill);
+          }
+          return {
+            activated: name,
+            description: skill.frontmatter.description,
+            hasPipeline: !!skill.pipelineSkillPath,
+            message: `Agent skill "${name}" is now active. Its methodology and instructions are loaded into context.${skill.pipelineSkillPath ? ' This skill also has a co-located pipeline that can be run with run_pipeline.' : ''}`,
+          };
+        } catch (err) {
+          return { error: `Failed to load agent skill "${name}": ${err instanceof Error ? err.message : String(err)}` };
+        }
+      },
+    },
+
+    read_skill_resource: {
+      description: 'Read a reference file from the active agent skill directory (e.g., guides, glossaries, templates).',
+      inputSchema: z.object({
+        path: z.string().describe('Relative path within the skill directory (e.g., "references/guide.md", "scripts/calc.py")'),
+      }),
+      execute: async ({ path }: { path: string }) => {
+        const activeSkill = options.activeAgentSkill;
+        if (!activeSkill) {
+          return { error: 'No agent skill is currently active. Use activate_skill first.' };
+        }
+
+        try {
+          const content = readAgentSkillResource(activeSkill.dirPath, path);
+          return { path, content };
+        } catch (err) {
+          return { error: err instanceof Error ? err.message : String(err) };
+        }
+      },
+    },
+
     // MCP tools exposed directly to the orchestrator LLM
     ...mcpOrchestratorTools,
   };
+
+  // Read-only mode: filter to only read-only tools
+  if (options.readOnly) {
+    const filtered: Record<string, unknown> = {};
+    for (const [name, tool] of Object.entries(allTools)) {
+      if (READ_ONLY_TOOLS.has(name)) {
+        // In read-only mode, block manage_config set action
+        if (name === 'manage_config') {
+          const original = tool as { description: string; inputSchema: z.ZodSchema; execute: (params: { action: string; key?: string; value?: string }) => Promise<unknown> };
+          filtered[name] = {
+            ...original,
+            execute: async (params: { action: string; key?: string; value?: string }) => {
+              if (params.action === 'set') {
+                return { error: 'Config changes are not allowed in read-only mode.' };
+              }
+              return original.execute(params);
+            },
+          };
+        } else {
+          filtered[name] = tool;
+        }
+      }
+    }
+    return filtered as typeof allTools;
+  }
+
+  // Permission wrapping
+  const permissions = options.permissions ?? {};
+  if (Object.keys(permissions).length > 0) {
+    for (const [name, tool] of Object.entries(allTools)) {
+      const level = resolvePermission(name, permissions);
+      if (level === 'deny') {
+        const typedTool = tool as { description: string; inputSchema: z.ZodSchema; execute: (...args: unknown[]) => Promise<unknown> };
+        typedTool.execute = async () => ({
+          error: `Tool "${name}" is denied by permission configuration.`,
+        });
+      } else if (level === 'confirm' && orchestratorConfig.onPermissionRequired) {
+        const typedTool = tool as { description: string; inputSchema: z.ZodSchema; execute: (params: unknown) => Promise<unknown> };
+        const originalExecute = typedTool.execute;
+        const onPermReq = orchestratorConfig.onPermissionRequired;
+        typedTool.execute = async (params: unknown) => {
+          const approved = await onPermReq(name, params as Record<string, unknown>);
+          if (!approved) {
+            return { error: `Tool "${name}" was denied by user.` };
+          }
+          return originalExecute(params);
+        };
+      }
+    }
+  }
+
+  return allTools;
 }

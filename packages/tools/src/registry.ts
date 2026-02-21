@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ToolDefinition, ToolContext, ToolResult } from './types.js';
+import type { ToolDefinition, ToolContext, ToolResult, HookEmitter } from './types.js';
 import { edgarTools } from './edgar/index.js';
 import { marketDataTools } from './market-data/index.js';
 import { newsTools } from './news/index.js';
@@ -147,6 +147,7 @@ export class ToolRegistry {
   toAISDKToolSet(
     toolDefs: ToolDefinition[],
     context: ToolContext,
+    hookEmitter?: HookEmitter,
   ): Record<string, { description: string; parameters: z.ZodSchema; execute: (params: unknown) => Promise<unknown> }> {
     const toolSet: Record<string, {
       description: string;
@@ -159,7 +160,19 @@ export class ToolRegistry {
         description: tool.description,
         parameters: tool.parameters,
         execute: async (params: unknown): Promise<unknown> => {
+          if (hookEmitter?.hasHooks('pre_tool')) {
+            await hookEmitter.emit('pre_tool', { tool_name: tool.name, params });
+          }
+          const start = Date.now();
           const result = await tool.execute(params, context);
+          if (hookEmitter?.hasHooks('post_tool')) {
+            hookEmitter.emit('post_tool', {
+              tool_name: tool.name,
+              success: result.success,
+              error: result.error,
+              duration_ms: Date.now() - start,
+            }).catch(() => {});
+          }
           if (!result.success) {
             return { error: result.error ?? 'Tool execution failed' };
           }
@@ -178,6 +191,7 @@ export class ToolRegistry {
     name: string,
     params: unknown,
     context: ToolContext,
+    hookEmitter?: HookEmitter,
   ): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
@@ -188,7 +202,21 @@ export class ToolRegistry {
       };
     }
 
-    return tool.execute(params, context);
+    if (hookEmitter?.hasHooks('pre_tool')) {
+      await hookEmitter.emit('pre_tool', { tool_name: name, params });
+    }
+    const start = Date.now();
+    const result = await tool.execute(params, context);
+    if (hookEmitter?.hasHooks('post_tool')) {
+      hookEmitter.emit('post_tool', {
+        tool_name: name,
+        success: result.success,
+        error: result.error,
+        duration_ms: Date.now() - start,
+      }).catch(() => {});
+    }
+
+    return result;
   }
 }
 

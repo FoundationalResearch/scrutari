@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { InputSchema, StageSchema, SkillOutputSchema, SkillSchema, ToolsConfigSchema } from './schema.js';
+import type { InputSchema, StageSchema, SkillOutputSchema, SkillSchema, ToolsConfigSchema, AgentSkillFrontmatterSchema } from './schema.js';
 
 export type Skill = z.infer<typeof SkillSchema>;
 export type SkillInput = z.infer<typeof InputSchema>;
@@ -15,4 +15,40 @@ export interface SkillEntry {
   skill: Skill;
   filePath: string;
   source: 'built-in' | 'user';
+}
+
+// ---------------------------------------------------------------------------
+// Agent Skill types (SKILL.md standard)
+// ---------------------------------------------------------------------------
+
+export type AgentSkillFrontmatter = z.infer<typeof AgentSkillFrontmatterSchema>;
+
+export interface AgentSkillSummary {
+  name: string;
+  description: string;
+  dirPath: string;
+  source: 'built-in' | 'user';
+  kind: 'agent';
+}
+
+export interface AgentSkill {
+  frontmatter: AgentSkillFrontmatter;
+  body: string;
+  dirPath: string;
+  source: 'built-in' | 'user';
+  pipelineSkillPath?: string;
+}
+
+export interface AgentSkillEntry {
+  skill: AgentSkill;
+  dirPath: string;
+  source: 'built-in' | 'user';
+}
+
+export interface UnifiedSkillSummary {
+  name: string;
+  description: string;
+  kind: 'pipeline' | 'agent';
+  source: 'built-in' | 'user';
+  path: string;
 }

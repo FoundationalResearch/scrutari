@@ -86,8 +86,12 @@ vi.mock('../verification/reporter.js', () => ({
 vi.mock('../router/cost.js', () => ({
   CostTracker: vi.fn().mockImplementation(() => ({
     totalSpent: 0,
+    totalCommitted: 0,
     checkBudget: vi.fn(),
     addCost: vi.fn(),
+    reserve: vi.fn(),
+    finalize: vi.fn(),
+    reset: vi.fn(),
   })),
   BudgetExceededError: class BudgetExceededError extends Error {
     constructor(spent: number, budget: number) {
@@ -562,5 +566,252 @@ describe('PipelineEngine', () => {
     await engine.run();
     expect(completeEvent).toBeDefined();
     expect(completeEvent!['partial']).toBe(true);
+  });
+
+  // --- Parallel execution ---
+
+  it('runs independent stages in the same level concurrently', async () => {
+    const ctx = makeContext({
+      skill: {
+        name: 'parallel-skill',
+        description: 'Skill with parallel stages',
+        stages: [
+          { name: 'gather_a', prompt: 'Gather A' },
+          { name: 'gather_b', prompt: 'Gather B' },
+          { name: 'merge', prompt: 'Merge', input_from: ['gather_a', 'gather_b'] },
+        ],
+        output: { primary: 'merge' },
+      },
+    });
+
+    const engine = new PipelineEngine(ctx);
+    const stageStarts: string[] = [];
+    const stageCompletes: string[] = [];
+
+    engine.on('stage:start', (event) => stageStarts.push(event.stageName));
+    engine.on('stage:complete', (event) => stageCompletes.push(event.stageName));
+
+    const result = await engine.run();
+
+    expect(result.stagesCompleted).toBe(3);
+    // All 3 stages should start and complete
+    expect(stageStarts).toContain('gather_a');
+    expect(stageStarts).toContain('gather_b');
+    expect(stageStarts).toContain('merge');
+    // gather_a and gather_b should both start before merge starts
+    expect(stageStarts.indexOf('gather_a')).toBeLessThan(stageStarts.indexOf('merge'));
+    expect(stageStarts.indexOf('gather_b')).toBeLessThan(stageStarts.indexOf('merge'));
+    // merge should complete after both gather stages complete
+    expect(stageCompletes.indexOf('gather_a')).toBeLessThan(stageCompletes.indexOf('merge'));
+    expect(stageCompletes.indexOf('gather_b')).toBeLessThan(stageCompletes.indexOf('merge'));
+    // All outputs should be present
+    expect(result.outputs).toHaveProperty('gather_a');
+    expect(result.outputs).toHaveProperty('gather_b');
+    expect(result.outputs).toHaveProperty('merge');
+  });
+
+  // --- Agent type integration ---
+
+  it('emits agentType in stage:start events', async () => {
+    const ctx = makeContext({
+      skill: {
+        name: 'typed-skill',
+        description: 'Skill with agent types',
+        stages: [
+          { name: 'gather', prompt: 'Gather', tools: ['edgar'], agent_type: 'explore' as const },
+          { name: 'analyze', prompt: 'Analyze', input_from: ['gather'] },
+        ],
+        output: { primary: 'analyze' },
+      },
+    });
+
+    const engine = new PipelineEngine(ctx);
+    const agentTypes: Array<string | undefined> = [];
+
+    engine.on('stage:start', (event) => {
+      agentTypes.push(event.agentType);
+    });
+
+    await engine.run();
+    expect(agentTypes[0]).toBe('explore');
+    expect(agentTypes[1]).toBe('default');
+  });
+
+  it('uses agent config model when no model override or stage model', async () => {
+    const ctx = makeContext({
+      skill: {
+        name: 'agent-config-skill',
+        description: 'Test agent config',
+        stages: [
+          { name: 'gather', prompt: 'Gather', tools: ['edgar'] },
+        ],
+        output: { primary: 'gather' },
+      },
+      agentConfig: {
+        explore: { model: 'gpt-4o-mini' },
+      },
+    });
+
+    const engine = new PipelineEngine(ctx);
+    const models: string[] = [];
+    engine.on('stage:start', (event) => models.push(event.model));
+
+    await engine.run();
+    // 'gather' with tools and no input_from → explore → uses agentConfig model
+    expect(models[0]).toBe('gpt-4o-mini');
+  });
+
+  it('respects maxConcurrency setting', async () => {
+    const ctx = makeContext({
+      skill: {
+        name: 'concurrent-skill',
+        description: 'Test concurrency',
+        stages: [
+          { name: 'a', prompt: 'A' },
+          { name: 'b', prompt: 'B' },
+          { name: 'c', prompt: 'C' },
+        ],
+        output: { primary: 'a' },
+      },
+      maxConcurrency: 1, // Force sequential
+    });
+
+    const engine = new PipelineEngine(ctx);
+    const result = await engine.run();
+    expect(result.stagesCompleted).toBe(3);
+  });
+
+  // --- Sub-pipeline execution ---
+
+  it('runs a sub_pipeline stage and returns sub-skill output', async () => {
+    const subSkill = {
+      name: 'sub-skill',
+      description: 'A sub-skill',
+      stages: [{ name: 'sub-stage', prompt: 'Do sub-thing' }],
+      output: { primary: 'sub-stage' },
+    };
+
+    const ctx = makeContext({
+      skill: {
+        name: 'parent-skill',
+        description: 'Parent with sub-pipeline',
+        stages: [
+          { name: 'delegate', sub_pipeline: 'sub-skill' },
+          { name: 'summarize', prompt: 'Summarize', input_from: ['delegate'] },
+        ],
+        output: { primary: 'summarize' },
+      },
+      loadSkill: (name: string) => {
+        if (name === 'sub-skill') return { skill: subSkill, filePath: '/test/sub.yaml', source: 'built-in' as const };
+        return undefined;
+      },
+    });
+
+    const engine = new PipelineEngine(ctx);
+    const result = await engine.run();
+    expect(result.stagesCompleted).toBe(2);
+    expect(result.outputs).toHaveProperty('delegate');
+    expect(result.outputs).toHaveProperty('summarize');
+  });
+
+  it('emits prefixed stage events from sub-pipeline', async () => {
+    const subSkill = {
+      name: 'sub-skill',
+      description: 'A sub-skill',
+      stages: [{ name: 'inner', prompt: 'Inner task' }],
+      output: { primary: 'inner' },
+    };
+
+    const ctx = makeContext({
+      skill: {
+        name: 'parent',
+        description: 'Parent',
+        stages: [{ name: 'outer', sub_pipeline: 'sub-skill' }],
+        output: { primary: 'outer' },
+      },
+      loadSkill: (name: string) => {
+        if (name === 'sub-skill') return { skill: subSkill, filePath: '/test/sub.yaml', source: 'built-in' as const };
+        return undefined;
+      },
+    });
+
+    const engine = new PipelineEngine(ctx);
+    const stageNames: string[] = [];
+    engine.on('stage:start', (e) => stageNames.push(e.stageName));
+
+    await engine.run();
+    // Should include both the outer stage:start AND the inner prefixed one
+    expect(stageNames).toContain('outer');
+    expect(stageNames).toContain('outer/inner');
+  });
+
+  it('handles missing sub_pipeline skill reference', async () => {
+    const ctx = makeContext({
+      skill: {
+        name: 'parent',
+        description: 'Parent',
+        stages: [
+          { name: 'delegate', sub_pipeline: 'nonexistent' },
+        ],
+        output: { primary: 'delegate' },
+      },
+      loadSkill: () => undefined,
+    });
+
+    const engine = new PipelineEngine(ctx);
+    const errors: string[] = [];
+    engine.on('stage:error', (e) => errors.push(e.stageName));
+
+    const result = await engine.run();
+    expect(result.partial).toBe(true);
+    expect(result.failedStages).toContain('delegate');
+  });
+
+  it('handles missing loadSkill function gracefully', async () => {
+    const ctx = makeContext({
+      skill: {
+        name: 'parent',
+        description: 'Parent',
+        stages: [{ name: 'delegate', sub_pipeline: 'some-skill' }],
+        output: { primary: 'delegate' },
+      },
+      // No loadSkill provided
+    });
+
+    const engine = new PipelineEngine(ctx);
+    const result = await engine.run();
+    expect(result.partial).toBe(true);
+    expect(result.failedStages).toContain('delegate');
+  });
+
+  it('propagates abort signal to sub-pipeline', async () => {
+    const controller = new AbortController();
+    controller.abort(); // Pre-abort
+
+    const subSkill = {
+      name: 'sub-skill',
+      description: 'A sub-skill',
+      stages: [{ name: 'inner', prompt: 'Task' }],
+      output: { primary: 'inner' },
+    };
+
+    const ctx = makeContext({
+      skill: {
+        name: 'parent',
+        description: 'Parent',
+        stages: [{ name: 'outer', sub_pipeline: 'sub-skill' }],
+        output: { primary: 'outer' },
+      },
+      loadSkill: (name: string) => {
+        if (name === 'sub-skill') return { skill: subSkill, filePath: '/test/sub.yaml', source: 'built-in' as const };
+        return undefined;
+      },
+      abortSignal: controller.signal,
+    });
+
+    const engine = new PipelineEngine(ctx);
+    const result = await engine.run();
+    expect(result.stagesCompleted).toBe(0);
+    expect(result.partial).toBe(true);
   });
 });

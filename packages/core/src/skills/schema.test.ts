@@ -240,6 +240,41 @@ describe('SkillSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  // --- agent_type tests ---
+
+  it('accepts valid agent_type on stages', () => {
+    const types = ['research', 'explore', 'verify', 'default'] as const;
+    for (const agentType of types) {
+      const result = SkillSchema.safeParse(makeMinimalSkill({
+        stages: [
+          { name: 's1', prompt: 'test', agent_type: agentType },
+        ],
+        output: { primary: 's1' },
+      }));
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it('rejects invalid agent_type', () => {
+    const result = SkillSchema.safeParse(makeMinimalSkill({
+      stages: [
+        { name: 's1', prompt: 'test', agent_type: 'superagent' },
+      ],
+      output: { primary: 's1' },
+    }));
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts stages without agent_type', () => {
+    const result = SkillSchema.safeParse(makeMinimalSkill({
+      stages: [
+        { name: 's1', prompt: 'test' },
+      ],
+      output: { primary: 's1' },
+    }));
+    expect(result.success).toBe(true);
+  });
+
   it('accepts MCP tool references in tools_optional', () => {
     const result = SkillSchema.safeParse(makeMinimalSkill({
       tools_optional: ['bloomberg/get_quote', 'custom-server/analyze'],
@@ -249,5 +284,90 @@ describe('SkillSchema', () => {
       output: { primary: 'stage1' },
     }));
     expect(result.success).toBe(true);
+  });
+
+  // --- sub_pipeline / sub_inputs tests ---
+
+  it('accepts stage with sub_pipeline and no prompt', () => {
+    const result = SkillSchema.safeParse(makeMinimalSkill({
+      stages: [
+        { name: 's1', sub_pipeline: 'deep-dive' },
+      ],
+      output: { primary: 's1' },
+    }));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.stages[0].sub_pipeline).toBe('deep-dive');
+      expect(result.data.stages[0].prompt).toBeUndefined();
+    }
+  });
+
+  it('rejects stage with both prompt and sub_pipeline', () => {
+    const result = SkillSchema.safeParse(makeMinimalSkill({
+      stages: [
+        { name: 's1', prompt: 'Do something', sub_pipeline: 'deep-dive' },
+      ],
+      output: { primary: 's1' },
+    }));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('cannot have both prompt and sub_pipeline'))).toBe(true);
+    }
+  });
+
+  it('rejects stage with neither prompt nor sub_pipeline', () => {
+    const result = SkillSchema.safeParse(makeMinimalSkill({
+      stages: [
+        { name: 's1' },
+      ],
+      output: { primary: 's1' },
+    }));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('must have either prompt or sub_pipeline'))).toBe(true);
+    }
+  });
+
+  it('rejects sub_pipeline stage with model set', () => {
+    const result = SkillSchema.safeParse(makeMinimalSkill({
+      stages: [
+        { name: 's1', sub_pipeline: 'deep-dive', model: 'claude-haiku-3-5-20241022' },
+      ],
+      output: { primary: 's1' },
+    }));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('sub_pipeline stages should not set model'))).toBe(true);
+    }
+  });
+
+  it('rejects sub_pipeline stage with tools set', () => {
+    const result = SkillSchema.safeParse(makeMinimalSkill({
+      stages: [
+        { name: 's1', sub_pipeline: 'deep-dive', tools: ['edgar'] },
+      ],
+      output: { primary: 's1' },
+    }));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some(i => i.message.includes('sub_pipeline stages should not set tools'))).toBe(true);
+    }
+  });
+
+  it('accepts sub_pipeline stage with sub_inputs', () => {
+    const result = SkillSchema.safeParse(makeMinimalSkill({
+      stages: [
+        {
+          name: 's1',
+          sub_pipeline: 'deep-dive',
+          sub_inputs: { ticker: 'AAPL', period: '2024-Q4' },
+        },
+      ],
+      output: { primary: 's1' },
+    }));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.stages[0].sub_inputs).toEqual({ ticker: 'AAPL', period: '2024-Q4' });
+    }
   });
 });

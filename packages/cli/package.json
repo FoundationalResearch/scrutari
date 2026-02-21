@@ -73,7 +73,9 @@
     "@scrutari/core": "file:../core",
     "@scrutari/mcp": "file:../mcp",
     "@scrutari/tools": "file:../tools",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^18.2.0",
+    "ink-testing-library": "^4.0.0",
     "tsup": "^8.5.1",
     "typescript": "^5.3.0",
     "vitest": "^2.0.0"

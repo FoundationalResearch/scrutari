@@ -5,9 +5,11 @@ import TextInput from 'ink-text-input';
 interface InputPromptProps {
   onSubmit: (text: string) => void;
   disabled?: boolean;
+  planMode?: boolean;
+  readOnly?: boolean;
 }
 
-export function InputPrompt({ onSubmit, disabled }: InputPromptProps): React.ReactElement {
+export function InputPrompt({ onSubmit, disabled, planMode, readOnly }: InputPromptProps): React.ReactElement {
   const [value, setValue] = useState('');
 
   const handleSubmit = (text: string) => {
@@ -17,9 +19,13 @@ export function InputPrompt({ onSubmit, disabled }: InputPromptProps): React.Rea
     setValue('');
   };
 
+  const promptColor = disabled ? 'gray' : readOnly ? 'green' : planMode ? 'yellow' : 'blue';
+
   return (
     <Box marginTop={1}>
-      <Text color={disabled ? 'gray' : 'blue'} bold>{'\u276F'} </Text>
+      {readOnly && <Text color="green" bold>[READ-ONLY] </Text>}
+      {planMode && !readOnly && <Text color="yellow" bold>[PLAN] </Text>}
+      <Text color={promptColor} bold>{'\u276F'} </Text>
       {disabled ? (
         <Text dimColor>Waiting for response...</Text>
       ) : (

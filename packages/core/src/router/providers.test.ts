@@ -26,6 +26,12 @@ describe('detectProvider', () => {
     expect(detectProvider('gemini-2.0-flash')).toBe('google');
   });
 
+  it('detects MiniMax models', () => {
+    expect(detectProvider('MiniMax-M2')).toBe('minimax');
+    expect(detectProvider('MiniMax-M2-Stable')).toBe('minimax');
+    expect(detectProvider('minimax-custom')).toBe('minimax');
+  });
+
   it('throws for unknown model prefix', () => {
     expect(() => detectProvider('llama-3-70b')).toThrow('Cannot determine provider');
     expect(() => detectProvider('mistral-large')).toThrow('Cannot determine provider');
@@ -88,6 +94,25 @@ describe('ProviderRegistry', () => {
       },
     });
     const model = registry.getModel('gemini-2.5-flash');
+    expect(model).toBeDefined();
+  });
+
+  it('throws when MiniMax API key is missing', () => {
+    const registry = new ProviderRegistry({
+      providers: {},
+    });
+    expect(() => registry.getModel('MiniMax-M2')).toThrow(
+      'MiniMax API key not configured',
+    );
+  });
+
+  it('creates MiniMax model when API key is provided', () => {
+    const registry = new ProviderRegistry({
+      providers: {
+        minimax: { apiKey: 'test-minimax-key' },
+      },
+    });
+    const model = registry.getModel('MiniMax-M2');
     expect(model).toBeDefined();
   });
 

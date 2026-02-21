@@ -14,11 +14,41 @@ export const StageSchema = z.object({
   model: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
   tools: z.array(z.string()).optional(),
-  prompt: z.string(),
+  prompt: z.string().optional(),
+  sub_pipeline: z.string().optional(),
+  sub_inputs: z.record(z.string(), z.string()).optional(),
   output_format: z.enum(['json', 'markdown', 'text']).optional(),
   max_tokens: z.number().int().positive().optional(),
   input_from: z.array(z.string()).optional(),
-}).strict();
+  agent_type: z.enum(['research', 'explore', 'verify', 'default']).optional(),
+}).strict().superRefine((stage, ctx) => {
+  // Must have exactly one of prompt OR sub_pipeline
+  if (!stage.sub_pipeline && !stage.prompt) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Stage "${stage.name}" must have either prompt or sub_pipeline`,
+    });
+  }
+  if (stage.sub_pipeline && stage.prompt) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Stage "${stage.name}" cannot have both prompt and sub_pipeline`,
+    });
+  }
+  // sub_pipeline stages shouldn't set model/tools
+  if (stage.sub_pipeline && stage.model) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Stage "${stage.name}": sub_pipeline stages should not set model`,
+    });
+  }
+  if (stage.sub_pipeline && stage.tools) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Stage "${stage.name}": sub_pipeline stages should not set tools`,
+    });
+  }
+});
 
 export const SkillOutputSchema = z.object({
   primary: z.string(),
@@ -137,6 +167,22 @@ export const SkillSchema = z.object({
       }
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// Agent Skill Frontmatter Schema (SKILL.md)
+// ---------------------------------------------------------------------------
+
+export const AgentSkillFrontmatterSchema = z.object({
+  name: z.string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-z][a-z0-9-]*$/, 'Name must be lowercase letters, digits, and hyphens, starting with a letter'),
+  description: z.string().min(1).max(1024),
+  license: z.string().optional(),
+  compatibility: z.string().max(500).optional(),
+  metadata: z.record(z.string(), z.string()).optional(),
+  'allowed-tools': z.string().optional(),
 });
 
 function isDefaultMatchingType(

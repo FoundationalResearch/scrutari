@@ -14,6 +14,8 @@ interface UseSessionReturn {
   messages: ChatMessage[];
   addMessage: (message: ChatMessage) => void;
   updateMessage: (id: string, update: Partial<ChatMessage>) => void;
+  replaceMessages: (newMessages: ChatMessage[], metadata?: { compactionBoundary?: number }) => void;
+  addCost: (cost: number) => void;
   save: () => void;
 }
 
@@ -73,11 +75,31 @@ export function useSession(options: UseSessionOptions = {}): UseSessionReturn {
     });
   }, []);
 
+  const replaceMessages = useCallback((newMessages: ChatMessage[], metadata?: { compactionBoundary?: number }) => {
+    setSession(prev => ({
+      ...prev,
+      messages: newMessages,
+      updatedAt: Date.now(),
+      compactionBoundary: metadata?.compactionBoundary,
+      compactionCount: (prev.compactionCount ?? 0) + 1,
+    }));
+  }, []);
+
+  const addCost = useCallback((cost: number) => {
+    setSession(prev => ({
+      ...prev,
+      totalCostUsd: prev.totalCostUsd + cost,
+      updatedAt: Date.now(),
+    }));
+  }, []);
+
   return {
     session,
     messages: session.messages,
     addMessage,
     updateMessage,
+    replaceMessages,
+    addCost,
     save,
   };
 }

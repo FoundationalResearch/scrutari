@@ -30,6 +30,7 @@ describe('config loader', () => {
     expect(config.providers.anthropic.default_model).toBe('claude-sonnet-4-20250514');
     expect(config.providers.openai.default_model).toBe('gpt-4o');
     expect(config.providers.google.default_model).toBe('gemini-2.5-flash');
+    expect(config.providers.minimax.default_model).toBe('MiniMax-M2');
     expect(config.mcp.servers).toEqual([]);
   });
 
@@ -130,6 +131,26 @@ defaults:
     expect(config.providers.google.default_model).toBe('gemini-2.5-pro');
     expect(config.defaults.provider).toBe('google');
     expect(config.defaults.model).toBe('gemini-2.5-pro');
+  });
+
+  it('loads MiniMax provider config from YAML', () => {
+    mkdirSync(testDir, { recursive: true });
+    writeFileSync(testConfigPath, `
+providers:
+  minimax:
+    api_key: test-minimax-key
+    default_model: MiniMax-M2-Stable
+defaults:
+  provider: minimax
+  model: MiniMax-M2-Stable
+`);
+
+    const config = loadConfig({ configPath: testConfigPath });
+
+    expect(config.providers.minimax.api_key).toBe('test-minimax-key');
+    expect(config.providers.minimax.default_model).toBe('MiniMax-M2-Stable');
+    expect(config.defaults.provider).toBe('minimax');
+    expect(config.defaults.model).toBe('MiniMax-M2-Stable');
   });
 
   it('rejects invalid config with zod validation errors', () => {
@@ -236,6 +257,14 @@ mcp:
       expect(config.providers.google.api_key).toBe('gemini-primary');
     });
 
+    it('auto-detects MINIMAX_API_KEY from env when no config file exists', () => {
+      vi.stubEnv('MINIMAX_API_KEY', 'minimax-auto-detect');
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.providers.minimax.api_key).toBe('minimax-auto-detect');
+    });
+
     it('auto-detects both keys from env simultaneously', () => {
       vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-both');
       vi.stubEnv('OPENAI_API_KEY', 'sk-openai-both');
@@ -318,6 +347,15 @@ providers:
       expect(result.config.providers.google.api_key).toBe('google-meta');
     });
 
+    it('reports envKeysUsed for MINIMAX_API_KEY', () => {
+      vi.stubEnv('MINIMAX_API_KEY', 'minimax-meta');
+
+      const result = loadConfigWithMeta({ configPath: testConfigPath });
+
+      expect(result.envKeysUsed).toContain('MINIMAX_API_KEY');
+      expect(result.config.providers.minimax.api_key).toBe('minimax-meta');
+    });
+
     it('does not report envKeysUsed when config already has the key', () => {
       mkdirSync(testDir, { recursive: true });
       writeFileSync(testConfigPath, `
@@ -330,6 +368,125 @@ providers:
       const result = loadConfigWithMeta({ configPath: testConfigPath });
 
       expect(result.envKeysUsed).not.toContain('ANTHROPIC_API_KEY');
+    });
+  });
+
+  describe('compaction config', () => {
+    it('returns compaction defaults when no config file exists', () => {
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.compaction.enabled).toBe(true);
+      expect(config.compaction.auto_threshold).toBe(0.85);
+      expect(config.compaction.preserve_turns).toBe(4);
+      expect(config.compaction.model).toBe('claude-haiku-3-5-20241022');
+    });
+
+    it('merges custom compaction config', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+compaction:
+  auto_threshold: 0.75
+  preserve_turns: 6
+`);
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.compaction.enabled).toBe(true); // default preserved
+      expect(config.compaction.auto_threshold).toBe(0.75);
+      expect(config.compaction.preserve_turns).toBe(6);
+      expect(config.compaction.model).toBe('claude-haiku-3-5-20241022'); // default preserved
+    });
+
+    it('allows disabling compaction', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+compaction:
+  enabled: false
+`);
+
+      const config = loadConfig({ configPath: testConfigPath });
+
+      expect(config.compaction.enabled).toBe(false);
+    });
+
+    it('rejects invalid auto_threshold below 0.5', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+compaction:
+  auto_threshold: 0.1
+`);
+
+      expect(() => loadConfig({ configPath: testConfigPath })).toThrow(ConfigError);
+    });
+
+    it('rejects invalid auto_threshold above 0.95', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+compaction:
+  auto_threshold: 0.99
+`);
+
+      expect(() => loadConfig({ configPath: testConfigPath })).toThrow(ConfigError);
+    });
+
+    it('rejects non-integer preserve_turns', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+compaction:
+  preserve_turns: 3.5
+`);
+
+      expect(() => loadConfig({ configPath: testConfigPath })).toThrow(ConfigError);
+    });
+  });
+
+  describe('session_budget_usd', () => {
+    it('returns session_budget_usd default when not configured', () => {
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.defaults.session_budget_usd).toBe(10.0);
+    });
+
+    it('merges custom session_budget_usd from config file', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+defaults:
+  session_budget_usd: 25.0
+`);
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.defaults.session_budget_usd).toBe(25.0);
+    });
+  });
+
+  describe('permissions', () => {
+    it('returns empty permissions by default', () => {
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.permissions).toEqual({});
+    });
+
+    it('merges permissions from config file', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+permissions:
+  run_pipeline: confirm
+  mcp.*: deny
+`);
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.permissions).toEqual({
+        run_pipeline: 'confirm',
+        'mcp.*': 'deny',
+      });
+    });
+
+    it('rejects invalid permission level', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+permissions:
+  run_pipeline: invalid
+`);
+
+      expect(() => loadConfig({ configPath: testConfigPath })).toThrow(ConfigError);
     });
   });
 

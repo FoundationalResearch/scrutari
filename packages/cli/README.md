@@ -84,8 +84,9 @@ When you type a message, Scrutari's LLM orchestrator interprets your intent and 
 | "what is AAPL trading at?" | Calls `get_quote` for a real-time stock price |
 | "search TSLA SEC filings" | Calls `search_filings` on SEC EDGAR |
 | "find news about AI chips" | Calls `search_news` for recent articles |
-| "what skills are available?" | Calls `list_skills` to show all pipelines |
+| "what skills are available?" | Calls `list_skills` to show all pipeline and agent skills |
 | "show my config" | Calls `manage_config` to display settings |
+| "/activate dcf-valuation" | Activates an agent skill for domain expertise |
 
 ### Pipeline architecture
 
@@ -113,14 +114,23 @@ Sessions are stored as JSON files in `~/.scrutari/sessions/`.
 
 ```
 scrutari [options]
+scrutari skill <subcommand> [args]
 
 Options:
   --continue          Resume the most recent session
   --resume <id>       Resume a specific session by ID
   -c, --config        Path to config file
   -v, --verbose       Show LLM reasoning tokens
+  --dry-run           Estimate pipeline costs without executing
+  --persona <name>    Start with a specific persona active
   --version           Print version
   --help              Show help
+
+Subcommands:
+  skill list          List all available skills (pipeline + agent)
+  skill create        Interactive skill creation wizard
+  skill validate      Validate a skill YAML file or agent skill directory
+  skill install       Install a skill from a URL or GitHub shorthand
 ```
 
 | Key | Action |
@@ -133,7 +143,17 @@ Options:
 
 When `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` is set in your environment, Scrutari works immediately with sensible defaults (Anthropic, Sonnet 4, $5.00 budget). For full control, create `~/.scrutari/config.yaml`.
 
-See the [full documentation](https://github.com/FoundationalResearch/scrutari#readme) for configuration details, custom skills, MCP servers, and more.
+Scrutari also supports context engineering: persistent instructions (`~/.scrutari/SCRUTARI.md`, `./SCRUTARI.local.md`), user preferences (`~/.scrutari/preferences.yaml`), analysis rules (`~/.scrutari/rules/`), financial personas (`~/.scrutari/personas/`), and auto-tracked user memory (`~/.scrutari/memory.json`). Use `/activate`, `/persona`, `/instruct`, `/compact`, and `/context` commands in chat.
+
+Scrutari includes 10 built-in **agent skills** (SEC filings, DCF valuation, credit analysis, technical analysis, and more) that provide domain expertise via progressive disclosure. Use `/activate <name>` to load methodology into the system prompt, or let the LLM activate skills automatically based on your questions.
+
+Long sessions are handled automatically: a context usage bar shows token consumption, and auto-compaction triggers at 85% capacity. Use `/compact` to manually compact, or `/compact keep all NVDA metrics` to preserve specific data.
+
+See the [full documentation](https://github.com/FoundationalResearch/scrutari#readme) for configuration details, context engineering, custom skills, MCP servers, and more.
+
+## Hooks
+
+Define lifecycle hooks in `~/.scrutari/hooks.yaml` to run shell commands before/after pipeline stages, tool calls, and session events. Hooks support `{variable}` placeholders, stage/tool filters, timeouts, and background execution. See the [full documentation](https://github.com/FoundationalResearch/scrutari#hooks) for details.
 
 ## License
 

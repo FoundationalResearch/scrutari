@@ -1,4 +1,16 @@
 import type { StageState } from '../tui/types.js';
+import type { PipelineEstimate, AgentSkill } from '@scrutari/core';
+
+export interface ThinkingSegment {
+  content: string;
+  toolCallId?: string;
+}
+
+export interface DryRunPreviewData {
+  skillName: string;
+  inputs: Record<string, unknown>;
+  estimate: PipelineEstimate;
+}
 
 export interface ChatMessage {
   id: string;
@@ -6,8 +18,13 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   thinking?: string;
+  thinkingSegments?: ThinkingSegment[];
   toolCalls?: ToolCallInfo[];
   pipelineState?: PipelineRunState;
+  dryRunPreview?: DryRunPreviewData;
+  isCompactionSummary?: boolean;
+  compactedMessageIds?: string[];
+  compactedAt?: number;
 }
 
 export interface ToolCallInfo {
@@ -41,6 +58,9 @@ export interface OrchestratorConfig {
   onToolCallStart: (info: ToolCallInfo) => void;
   onToolCallComplete: (id: string, result: unknown) => void;
   onPipelineEvent: (event: PipelineEvent) => void;
+  onApprovalRequired?: (estimate: PipelineEstimate) => Promise<boolean>;
+  onPermissionRequired?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
+  onAgentSkillActivated?: (skill: AgentSkill) => void;
 }
 
 export type PipelineEvent =
