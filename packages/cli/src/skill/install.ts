@@ -1,5 +1,5 @@
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { join, resolve, basename } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
 import chalk from 'chalk';

@@ -19,6 +19,7 @@ function makeConfig(): Config {
       anthropic: { api_key: 'sk-test', default_model: 'claude-sonnet-4-20250514' },
       openai: { api_key: undefined, default_model: 'gpt-4o' },
       google: { api_key: undefined, default_model: 'gemini-2.5-flash' },
+      minimax: { api_key: undefined, default_model: 'MiniMax-M1' },
     },
     mcp: { servers: [] },
     agents: { research: {}, explore: {}, verify: {}, default: {} },
