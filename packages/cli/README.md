@@ -154,6 +154,16 @@ Long sessions are handled automatically: a context usage bar shows token consump
 
 See the [full documentation](https://github.com/FoundationalResearch/scrutari#readme) for configuration details, context engineering, custom skills, MCP servers, and more.
 
+### MarketOnePager
+
+To connect the [MarketOnePager](https://marketonepager.com) MCP server, set your API key:
+
+```bash
+export MARKETONEPAGER_KEY=your-api-key
+```
+
+Optionally set `MARKETONEPAGER_URL` to override the default server URL (`http://localhost:8001/mcp`). No config file changes needed.
+
 ## Hooks
 
 Define lifecycle hooks in `~/.scrutari/hooks.yaml` to run shell commands before/after pipeline stages, tool calls, and session events. Hooks support `{variable}` placeholders, stage/tool filters, timeouts, and background execution. See the [full documentation](https://github.com/FoundationalResearch/scrutari#hooks) for details.

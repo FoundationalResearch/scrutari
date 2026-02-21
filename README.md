@@ -597,6 +597,22 @@ mcp:
 
 MCP tools are automatically registered and can be referenced in skill `tools` fields by server name. Servers support both **stdio** (local process) and **HTTP/SSE** (remote) transports with automatic timeout (30s) and retry on transient failures.
 
+### MarketOnePager
+
+Scrutari auto-configures the [MarketOnePager](https://marketonepager.com) MCP server when the `MARKETONEPAGER_KEY` environment variable is set:
+
+```bash
+export MARKETONEPAGER_KEY=your-api-key
+```
+
+Optionally, set a custom server URL (defaults to `http://localhost:8001/mcp`):
+
+```bash
+export MARKETONEPAGER_URL=https://your-server.com/mcp
+```
+
+No config file changes needed — Scrutari will automatically connect to the MarketOnePager server and register its tools for use in chat and pipelines.
+
 ## CLI Reference
 
 ```
