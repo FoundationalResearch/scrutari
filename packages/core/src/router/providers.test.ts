@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectProvider, ProviderRegistry } from './providers.js';
+import { detectProvider, remapModelForProvider, ProviderRegistry } from './providers.js';
 
 describe('detectProvider', () => {
   it('detects Anthropic models', () => {
@@ -127,5 +127,112 @@ describe('ProviderRegistry', () => {
     // Both should succeed without creating a new provider
     expect(model1).toBeDefined();
     expect(model2).toBeDefined();
+  });
+
+  describe('remapModel', () => {
+    it('returns original model when provider has API key', () => {
+      const registry = new ProviderRegistry({
+        providers: {
+          anthropic: { apiKey: 'sk-ant-test' },
+        },
+      });
+      expect(registry.remapModel('claude-sonnet-4-20250514')).toBe('claude-sonnet-4-20250514');
+      expect(registry.remapModel('claude-haiku-3-5-20241022')).toBe('claude-haiku-3-5-20241022');
+    });
+
+    it('remaps Anthropic fast model to OpenAI when only OpenAI key available', () => {
+      const registry = new ProviderRegistry({
+        providers: {
+          openai: { apiKey: 'sk-openai-test' },
+        },
+      });
+      expect(registry.remapModel('claude-haiku-3-5-20241022')).toBe('gpt-4o-mini');
+    });
+
+    it('remaps Anthropic standard model to OpenAI when only OpenAI key available', () => {
+      const registry = new ProviderRegistry({
+        providers: {
+          openai: { apiKey: 'sk-openai-test' },
+        },
+      });
+      expect(registry.remapModel('claude-sonnet-4-20250514')).toBe('gpt-4o');
+    });
+
+    it('remaps Anthropic models to Google when only Google key available', () => {
+      const registry = new ProviderRegistry({
+        providers: {
+          google: { apiKey: 'test-google-key' },
+        },
+      });
+      expect(registry.remapModel('claude-haiku-3-5-20241022')).toBe('gemini-2.5-flash');
+      expect(registry.remapModel('claude-sonnet-4-20250514')).toBe('gemini-2.5-pro');
+    });
+
+    it('remaps OpenAI models to Anthropic when only Anthropic key available', () => {
+      const registry = new ProviderRegistry({
+        providers: {
+          anthropic: { apiKey: 'sk-ant-test' },
+        },
+      });
+      expect(registry.remapModel('gpt-4o')).toBe('claude-sonnet-4-20250514');
+      expect(registry.remapModel('gpt-4o-mini')).toBe('claude-haiku-3-5-20241022');
+    });
+
+    it('returns original model when no providers have API keys', () => {
+      const registry = new ProviderRegistry({
+        providers: {},
+      });
+      expect(registry.remapModel('claude-sonnet-4-20250514')).toBe('claude-sonnet-4-20250514');
+    });
+
+    it('returns unknown model as-is', () => {
+      const registry = new ProviderRegistry({
+        providers: {
+          openai: { apiKey: 'sk-openai-test' },
+        },
+      });
+      expect(registry.remapModel('llama-3-70b')).toBe('llama-3-70b');
+    });
+
+    it('treats unknown model with known provider prefix as standard tier', () => {
+      const registry = new ProviderRegistry({
+        providers: {
+          openai: { apiKey: 'sk-openai-test' },
+        },
+      });
+      // A hypothetical future Claude model not in the tier map defaults to standard
+      expect(registry.remapModel('claude-future-model')).toBe('gpt-4o');
+    });
+
+    it('prefers Anthropic over OpenAI when both available', () => {
+      const registry = new ProviderRegistry({
+        providers: {
+          anthropic: { apiKey: 'sk-ant-test' },
+          openai: { apiKey: 'sk-openai-test' },
+        },
+      });
+      // Google model should remap to Anthropic (higher priority)
+      expect(registry.remapModel('gemini-2.5-flash')).toBe('claude-haiku-3-5-20241022');
+    });
+  });
+});
+
+describe('remapModelForProvider', () => {
+  it('returns original when provider has key', () => {
+    expect(remapModelForProvider('claude-sonnet-4-20250514', {
+      providers: { anthropic: { apiKey: 'key' } },
+    })).toBe('claude-sonnet-4-20250514');
+  });
+
+  it('remaps to available provider', () => {
+    expect(remapModelForProvider('claude-sonnet-4-20250514', {
+      providers: { google: { apiKey: 'key' } },
+    })).toBe('gemini-2.5-pro');
+  });
+
+  it('remaps premium tier correctly', () => {
+    expect(remapModelForProvider('claude-opus-4-20250514', {
+      providers: { openai: { apiKey: 'key' } },
+    })).toBe('o1');
   });
 });

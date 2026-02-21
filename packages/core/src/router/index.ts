@@ -19,6 +19,7 @@ export {
   type ProviderId,
   type ProviderConfig,
   detectProvider,
+  remapModelForProvider,
   ProviderRegistry,
 } from './providers.js';
 

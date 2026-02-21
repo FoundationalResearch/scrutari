@@ -239,7 +239,10 @@ export class PipelineEngine extends EventEmitter<PipelineEvents> {
           const agentDefaults = getAgentDefaults(agentType, this.context.agentConfig);
 
           // Model resolution chain: modelOverride > stage.model > agentConfig > agentDefaults
-          const resolvedModel = modelOverride ?? stage.model ?? agentDefaults.model;
+          // Then remap to an available provider if the resolved model's provider has no API key
+          const resolvedModel = this.providers.remapModel(
+            modelOverride ?? stage.model ?? agentDefaults.model,
+          );
 
           this.emit('stage:start', {
             stageName: stage.name,
@@ -549,7 +552,9 @@ export class PipelineEngine extends EventEmitter<PipelineEvents> {
 
       const analysisText = analysisTexts.join('\n\n');
       const { modelOverride, maxBudgetUsd } = this.context;
-      const modelId = modelOverride ?? stage.model ?? 'claude-sonnet-4-20250514';
+      const modelId = this.providers.remapModel(
+        modelOverride ?? stage.model ?? 'claude-sonnet-4-20250514',
+      );
       const model = this.providers.getModel(modelId);
       const budget = { maxCostUsd: maxBudgetUsd, tracker: this.costTracker };
 

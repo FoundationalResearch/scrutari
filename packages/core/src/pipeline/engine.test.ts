@@ -5,6 +5,7 @@ import { PipelineEngine, type PipelineContext } from './engine.js';
 vi.mock('../router/providers.js', () => ({
   ProviderRegistry: vi.fn().mockImplementation(() => ({
     getModel: vi.fn().mockReturnValue({ modelId: 'mock-model' }),
+    remapModel: vi.fn().mockImplementation((modelId: string) => modelId),
   })),
 }));
 

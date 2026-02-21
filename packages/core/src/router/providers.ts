@@ -14,6 +14,86 @@ export interface ProviderConfig {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Model tier mapping — used to find equivalent models across providers
+// ---------------------------------------------------------------------------
+
+type ModelTier = 'fast' | 'standard' | 'premium';
+
+const MODEL_TO_TIER: Record<string, ModelTier> = {
+  // Anthropic
+  'claude-haiku-3-5-20241022': 'fast',
+  'claude-sonnet-4-20250514': 'standard',
+  'claude-opus-4-20250514': 'premium',
+  // OpenAI
+  'gpt-4o-mini': 'fast',
+  'gpt-4o': 'standard',
+  'o1-mini': 'fast',
+  'o1': 'premium',
+  // Google
+  'gemini-2.0-flash': 'fast',
+  'gemini-2.5-flash': 'fast',
+  'gemini-2.5-pro': 'standard',
+  // MiniMax
+  'MiniMax-M2': 'standard',
+  'MiniMax-M2-Stable': 'standard',
+};
+
+const PROVIDER_TIER_MODELS: Record<ProviderId, Record<ModelTier, string>> = {
+  anthropic: {
+    fast: 'claude-haiku-3-5-20241022',
+    standard: 'claude-sonnet-4-20250514',
+    premium: 'claude-opus-4-20250514',
+  },
+  openai: {
+    fast: 'gpt-4o-mini',
+    standard: 'gpt-4o',
+    premium: 'o1',
+  },
+  google: {
+    fast: 'gemini-2.5-flash',
+    standard: 'gemini-2.5-pro',
+    premium: 'gemini-2.5-pro',
+  },
+  minimax: {
+    fast: 'MiniMax-M2',
+    standard: 'MiniMax-M2',
+    premium: 'MiniMax-M2',
+  },
+};
+
+const PROVIDER_PRIORITY: ProviderId[] = ['anthropic', 'openai', 'google', 'minimax'];
+
+/**
+ * Remap a model to an equivalent model from an available provider.
+ * If the model's provider has an API key, returns the model as-is.
+ * Otherwise, finds the model's capability tier and returns the equivalent
+ * model from the first available provider.
+ */
+export function remapModelForProvider(modelId: string, config: ProviderConfig): string {
+  let provider: ProviderId;
+  try {
+    provider = detectProvider(modelId);
+  } catch {
+    // Unknown model prefix — return as-is
+    return modelId;
+  }
+
+  const hasKey = !!config.providers[provider]?.apiKey;
+  if (hasKey) return modelId;
+
+  const tier = MODEL_TO_TIER[modelId] ?? 'standard';
+
+  for (const p of PROVIDER_PRIORITY) {
+    if (config.providers[p]?.apiKey) {
+      return PROVIDER_TIER_MODELS[p][tier];
+    }
+  }
+
+  // No provider available — return original (will fail with a clear error at call time)
+  return modelId;
+}
+
 /** Determine which provider a model string belongs to. */
 export function detectProvider(modelId: string): ProviderId {
   if (modelId.startsWith('claude-')) return 'anthropic';
@@ -42,6 +122,14 @@ export class ProviderRegistry {
 
   constructor(config: ProviderConfig) {
     this.config = config;
+  }
+
+  /**
+   * Remap a model to an equivalent from an available provider.
+   * If the model's provider has an API key, returns it unchanged.
+   */
+  remapModel(modelId: string): string {
+    return remapModelForProvider(modelId, this.config);
   }
 
   /** Return a LanguageModel for the given model-id, creating the provider lazily. */

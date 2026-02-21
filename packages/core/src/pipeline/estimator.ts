@@ -63,6 +63,7 @@ export function estimatePipelineCost(
   modelOverride?: string,
   agentConfig?: Partial<Record<AgentType, Partial<AgentDefaults>>>,
   loadSkill?: (name: string) => SkillEntry | undefined,
+  remapModel?: (modelId: string) => string,
 ): PipelineEstimate {
   const stages: StageEstimate[] = [];
 
@@ -71,7 +72,7 @@ export function estimatePipelineCost(
     if (stage.sub_pipeline && loadSkill) {
       const entry = loadSkill(stage.sub_pipeline);
       if (entry) {
-        const subEstimate = estimatePipelineCost(entry.skill, modelOverride, agentConfig, loadSkill);
+        const subEstimate = estimatePipelineCost(entry.skill, modelOverride, agentConfig, loadSkill, remapModel);
         // Add sub-pipeline stages with prefixed names
         for (const subStage of subEstimate.stages) {
           stages.push({
@@ -86,7 +87,8 @@ export function estimatePipelineCost(
 
     const agentType = resolveAgentType(stage);
     const defaults = getAgentDefaults(agentType, agentConfig);
-    const model = modelOverride ?? stage.model ?? defaults.model;
+    const rawModel = modelOverride ?? stage.model ?? defaults.model;
+    const model = remapModel ? remapModel(rawModel) : rawModel;
     const estimatedOutputTokens = stage.max_tokens ?? defaults.maxTokens;
     const estimatedInputTokens = estimatedOutputTokens * 2;
     const estimatedCostUsd = calculateCost(model, estimatedInputTokens, estimatedOutputTokens);

@@ -14,7 +14,9 @@ import {
   estimatePipelineCost,
   loadAgentSkill,
   readAgentSkillResource,
+  remapModelForProvider,
   type PipelineContext,
+  type ProviderConfig,
   type SkillEntry,
   type AgentSkillSummary,
   type AgentSkill,
@@ -142,6 +144,17 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
   const builtInDir = getBuiltInSkillsDir();
   const userDir = expandTilde(config.skills_dir);
 
+  // Build provider config for model remapping
+  const providerConfig: ProviderConfig = {
+    providers: {
+      anthropic: { apiKey: config.providers.anthropic?.api_key },
+      openai: { apiKey: config.providers.openai?.api_key },
+      google: { apiKey: config.providers.google?.api_key },
+      minimax: { apiKey: config.providers.minimax?.api_key },
+    },
+  };
+  const remapModel = (modelId: string) => remapModelForProvider(modelId, providerConfig);
+
   // Get MCP tools once (stable for the lifetime of this tool set)
   const mcpTools = mcpClient?.listTools() ?? [];
   const mcpOrchestratorTools = mcpToAISDKTools(mcpTools);
@@ -194,7 +207,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
         const agentConfigMap = buildAgentConfigMap(config);
         const agentConfig = Object.keys(agentConfigMap).length > 0 ? agentConfigMap : undefined;
         const loadSkillFn = (n: string) => findSkill(n, builtInDir, userDir);
-        const estimate = estimatePipelineCost(skill, model, agentConfig, loadSkillFn);
+        const estimate = estimatePipelineCost(skill, model, agentConfig, loadSkillFn, remapModel);
 
         // Dry-run: return estimate without executing
         if (options.dryRun) {
@@ -279,13 +292,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
           inputs: resolvedInputs,
           modelOverride: model,
           maxBudgetUsd: budgetUsd,
-          providerConfig: {
-            providers: {
-              anthropic: { apiKey: config.providers.anthropic.api_key },
-              openai: { apiKey: config.providers.openai.api_key },
-              google: { apiKey: config.providers.google.api_key },
-            },
-          },
+          providerConfig,
           resolveTools,
           isToolAvailable: (name: string) => toolRegistry.isAvailable(name),
           toolsConfig: skill.tools_config,
@@ -401,7 +408,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
         }
 
         const agentConfigMap = buildAgentConfigMap(config);
-        const estimate = estimatePipelineCost(skill, model, Object.keys(agentConfigMap).length > 0 ? agentConfigMap : undefined, (n: string) => findSkill(n, builtInDir, userDir));
+        const estimate = estimatePipelineCost(skill, model, Object.keys(agentConfigMap).length > 0 ? agentConfigMap : undefined, (n: string) => findSkill(n, builtInDir, userDir), remapModel);
 
         return {
           preview: true,
@@ -494,7 +501,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
         const skillEntry = findSkill(name, builtInDir, userDir);
         if (skillEntry) {
           const skill = skillEntry.skill;
-          const estimate = estimatePipelineCost(skill);
+          const estimate = estimatePipelineCost(skill, undefined, undefined, undefined, remapModel);
 
           return {
             name: skill.name,
