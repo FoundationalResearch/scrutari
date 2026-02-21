@@ -35,6 +35,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 export OPENAI_API_KEY=sk-...
 # or
 export GEMINI_API_KEY=...
+# or
+export MINIMAX_API_KEY=...
 npx @foundationalresearch/scrutari
 ```
 
@@ -45,12 +47,12 @@ npm install -g @foundationalresearch/scrutari
 scrutari
 ```
 
-That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` from your environment and opens an interactive chat.
+That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `MINIMAX_API_KEY` from your environment and opens an interactive chat.
 
 ### Example session
 
 ```
-╭─ scrutari v0.1.0 ─────────────────────────────────────────────╮
+╭─ scrutari v0.2.0 ─────────────────────────────────────────────╮
 │                                                                │
 │  Welcome, user!            │ Tips for getting started          │
 │                            │ "analyze NVDA" run a deep ...     │
@@ -122,6 +124,7 @@ Options:
   -c, --config        Path to config file
   -v, --verbose       Show LLM reasoning tokens
   --dry-run           Estimate pipeline costs without executing
+  --read-only         Only allow read-only tools (quotes, filings, news)
   --persona <name>    Start with a specific persona active
   --version           Print version
   --help              Show help

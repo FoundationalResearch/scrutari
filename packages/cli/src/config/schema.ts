@@ -41,6 +41,7 @@ const mcpServerSchema = z.object({
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   url: z.string().url().optional(),
+  headers: z.record(z.string(), z.string()).optional(),
 }).strict().superRefine((server, ctx) => {
   const hasCommand = typeof server.command === 'string' && server.command.length > 0;
   const hasUrl = typeof server.url === 'string' && server.url.length > 0;
@@ -116,6 +117,7 @@ export interface ResolvedMcpServerConfig {
   command?: string;
   args?: string[];
   url?: string;
+  headers?: Record<string, string>;
 }
 
 export interface AgentConfigEntry {

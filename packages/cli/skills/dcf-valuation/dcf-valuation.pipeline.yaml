@@ -1,0 +1,77 @@
+name: dcf-valuation
+description: Automated DCF valuation pipeline — gathers financials, builds projections, calculates WACC, and estimates fair value
+model: claude-sonnet
+inputs:
+  - name: ticker
+    type: string
+    description: Stock ticker symbol (e.g., AAPL, MSFT)
+  - name: years
+    type: string
+    description: Number of projection years (default 5)
+    default: "5"
+tools_required:
+  - get_financials
+  - get_quote
+  - search_filings
+stages:
+  - name: gather-financials
+    prompt: |
+      Gather the last 5 years of financial data for {ticker}:
+      - Revenue, EBITDA, EBIT, net income
+      - Capital expenditures, depreciation & amortization
+      - Working capital components
+      - Debt structure and interest expense
+      - Share count (diluted)
+      - Current stock price and market cap
+
+      Present the data in a structured table format. Note any data gaps or inconsistencies.
+    tools:
+      - get_financials
+      - get_quote
+      - search_filings
+
+  - name: build-projections
+    prompt: |
+      Using the historical financials from the previous stage, build a {years}-year DCF projection for {ticker}:
+
+      1. Project revenue using historical growth rates adjusted for industry outlook
+      2. Project EBITDA margins based on historical trends and competitive position
+      3. Estimate CapEx as % of revenue
+      4. Estimate working capital changes
+      5. Calculate unlevered free cash flow for each projected year
+
+      Present three scenarios (bull, base, bear) with different growth and margin assumptions.
+      Show your work in a clear yearly table.
+    depends_on:
+      - gather-financials
+
+  - name: calculate-wacc
+    prompt: |
+      Calculate WACC for {ticker} using the financial data gathered:
+
+      1. Cost of Equity: Use CAPM (risk-free rate, beta, equity risk premium)
+      2. Cost of Debt: Use effective interest rate from financials
+      3. Capital structure: Use current market cap and debt levels
+      4. Tax rate: Use effective tax rate from financials
+
+      Show each component and the final WACC calculation. Compare to industry typical range.
+    depends_on:
+      - gather-financials
+
+  - name: valuation-synthesis
+    prompt: |
+      Complete the DCF valuation for {ticker}:
+
+      1. Apply terminal value using Gordon Growth Model (2.5% terminal growth) and exit multiple method
+      2. Discount projected FCFs and terminal value at the calculated WACC
+      3. Calculate Enterprise Value, then bridge to Equity Value and implied share price
+      4. Build a sensitivity table (WACC vs terminal growth rate)
+      5. Compare implied value to current market price
+
+      Present bull/base/bear valuations and overall assessment (undervalued, fairly valued, overvalued).
+    depends_on:
+      - build-projections
+      - calculate-wacc
+output:
+  primary: valuation-synthesis
+  format: markdown

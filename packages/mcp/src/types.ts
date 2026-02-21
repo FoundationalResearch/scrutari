@@ -9,6 +9,8 @@ export interface MCPServerConfig {
   args?: string[];
   /** URL for HTTP/SSE transport */
   url?: string;
+  /** Custom headers for HTTP transport (e.g. API key auth) */
+  headers?: Record<string, string>;
 }
 
 /**

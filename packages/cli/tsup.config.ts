@@ -7,7 +7,7 @@ export default defineConfig({
   outDir: 'dist',
   clean: true,
   splitting: false,
-  sourcemap: true,
+  sourcemap: false,
   dts: false,
   // Bundle workspace packages (@scrutari/*) into the output
   noExternal: [
@@ -23,13 +23,11 @@ export default defineConfig({
     '@ai-sdk/google',
     '@modelcontextprotocol/sdk',
     'chalk',
-    'conf',
     'docx',
     'eventemitter3',
     'ink',
     'ink-spinner',
     'ink-text-input',
-    'ora',
     'react',
     'yaml',
     'zod',

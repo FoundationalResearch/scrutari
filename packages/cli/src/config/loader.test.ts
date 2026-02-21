@@ -188,7 +188,7 @@ invalid: yaml: content: [
     expect(() => loadConfig({ configPath: testConfigPath })).toThrow(ConfigError);
   });
 
-  it('appends MCP servers to defaults', () => {
+  it('loads MCP servers from config', () => {
     mkdirSync(testDir, { recursive: true });
     writeFileSync(testConfigPath, `
 mcp:
@@ -199,7 +199,7 @@ mcp:
 `);
 
     const config = loadConfig({ configPath: testConfigPath });
-    
+
     expect(config.mcp.servers).toHaveLength(1);
     expect(config.mcp.servers[0].name).toBe('bloomberg');
   });
@@ -213,6 +213,54 @@ mcp:
 `);
 
     expect(() => loadConfig({ configPath: testConfigPath })).toThrow(ConfigError);
+  });
+
+  it('loads MCP server with headers', () => {
+    mkdirSync(testDir, { recursive: true });
+    writeFileSync(testConfigPath, `
+mcp:
+  servers:
+    - name: my-api
+      url: http://localhost:9000/mcp
+      headers:
+        X-API-Key: my-secret-key
+        Authorization: Bearer tok123
+`);
+
+    const config = loadConfig({ configPath: testConfigPath });
+
+    const myApi = config.mcp.servers.find(s => s.name === 'my-api');
+    expect(myApi).toBeDefined();
+    expect(myApi!.headers).toEqual({
+      'X-API-Key': 'my-secret-key',
+      'Authorization': 'Bearer tok123',
+    });
+  });
+
+  it('resolves env vars in MCP server headers', () => {
+    mkdirSync(testDir, { recursive: true });
+    writeFileSync(testConfigPath, `
+mcp:
+  servers:
+    - name: env-api
+      url: http://localhost:9000/mcp
+      headers:
+        X-API-Key: env:TEST_MCP_KEY
+`);
+
+    vi.stubEnv('TEST_MCP_KEY', 'resolved-mcp-key');
+
+    const config = loadConfig({ configPath: testConfigPath });
+
+    const envApi = config.mcp.servers.find(s => s.name === 'env-api');
+    expect(envApi).toBeDefined();
+    expect(envApi!.headers).toEqual({ 'X-API-Key': 'resolved-mcp-key' });
+  });
+
+  it('defaults to empty MCP servers list', () => {
+    const config = loadConfig({ configPath: testConfigPath });
+
+    expect(config.mcp.servers).toEqual([]);
   });
 
   describe('zero-config env var fallbacks', () => {

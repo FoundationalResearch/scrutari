@@ -12,5 +12,7 @@ export function createHttpTransport(config: MCPServerConfig): Transport {
     throw new Error(`MCP server "${config.name}" has no URL configured for HTTP transport`);
   }
 
-  return new StreamableHTTPClientTransport(new URL(config.url));
+  return new StreamableHTTPClientTransport(new URL(config.url), {
+    requestInit: config.headers ? { headers: config.headers } : undefined,
+  });
 }

@@ -42,6 +42,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 export OPENAI_API_KEY=sk-...
 # or
 export GEMINI_API_KEY=...
+# or
+export MINIMAX_API_KEY=...
 npx @foundationalresearch/scrutari
 ```
 
@@ -52,12 +54,12 @@ npm install -g @foundationalresearch/scrutari
 scrutari
 ```
 
-That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` from your environment and opens an interactive chat.
+That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `MINIMAX_API_KEY` from your environment and opens an interactive chat.
 
 ### Example session
 
 ```
-╭─ scrutari v0.1.0 ────────────────────────────────────────────────────╮
+╭─ scrutari v0.2.0 ────────────────────────────────────────────────────╮
 │                                                                      │
 │  Welcome, user!               │ Tips for getting started             │
 │                               │ "analyze NVDA" run a deep analysis   │
@@ -204,7 +206,7 @@ Both Markdown and DOCX include a **verification section** when the skill has a `
 
 ### Zero-config mode
 
-When `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` is set in your environment, Scrutari works immediately with sensible defaults:
+When `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `MINIMAX_API_KEY` is set in your environment, Scrutari works immediately with sensible defaults:
 
 | Setting | Default |
 |---------|---------|
@@ -229,9 +231,12 @@ providers:
   google:
     api_key: env:GEMINI_API_KEY
     default_model: gemini-2.5-flash
+  minimax:
+    api_key: env:MINIMAX_API_KEY
+    default_model: MiniMax-M2
 
 defaults:
-  provider: anthropic                 # anthropic | openai | google
+  provider: anthropic                 # anthropic | openai | google | minimax
   model: claude-sonnet-4-20250514
   max_budget_usd: 5.0
   output_format: markdown             # markdown | json | docx
@@ -410,6 +415,12 @@ This data is injected into the system prompt so the LLM can personalize response
 | `/persona [name]` | Switch persona or show current. `/persona off` to deactivate |
 | `/instruct <text>` | Set session-level instructions. `/instruct clear` to remove |
 | `/context` | Show active context summary |
+| `/plan` | Toggle plan mode (outline steps before executing) |
+| `/dry-run` | Toggle dry-run mode (estimate costs without executing) |
+| `/read-only` | Toggle read-only mode (only data lookups, no writes) |
+| `/skills` | Browse available skills interactively |
+| `/help` | Show available commands |
+| `/<skill> [args]` | Run a skill directly (e.g., `/deep-dive NVDA`) |
 
 ## Custom Skills
 
@@ -598,6 +609,7 @@ Options:
   -c, --config        Path to config file
   -v, --verbose       Show LLM reasoning tokens
   --dry-run           Estimate pipeline costs without executing
+  --read-only         Only allow read-only tools (quotes, filings, news)
   --persona <name>    Start with a specific persona active
   --version           Print version
   --help              Show help
@@ -694,6 +706,8 @@ Every pipeline run tracks token usage and cost per stage with built-in pricing f
 | Gemini 2.5 Pro | $1.25 | $10.00 |
 | Gemini 2.5 Flash | $0.15 | $0.60 |
 | Gemini 2.0 Flash | $0.10 | $0.40 |
+| MiniMax M2 | $1.10 | $4.40 |
+| MiniMax M2 Stable | $1.10 | $4.40 |
 
 The default budget cap is $5.00 per pipeline run. If a stage would exceed the budget, the pipeline stops and returns partial results for any completed stages. Cost is displayed inline in the chat during pipeline execution.
 
@@ -710,7 +724,7 @@ The default budget cap is $5.00 per pipeline run. If a stage would exceed the bu
 ## Requirements
 
 - **Node.js** >= 20
-- **API key** from [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/api-keys), or [Google AI Studio](https://aistudio.google.com/apikey)
+- **API key** from [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/api-keys), [Google AI Studio](https://aistudio.google.com/apikey), or [MiniMax](https://www.minimax.io/)
 
 ## Development
 
@@ -735,4 +749,4 @@ cd packages/core && npx vitest
 
 ## License
 
-[MIT](./packages/cli/LICENSE)
+[MIT](./LICENSE)

@@ -16,7 +16,7 @@ import { listSessions } from './chat/session/storage.js';
 import { scanSkillFiles, scanSkillSummaries, scanAgentSkillSummaries, HookManager } from '@scrutari/core';
 import { MCPClientManager } from '@scrutari/mcp';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 function getBuiltInSkillsDir(): string {
   const thisFile = fileURLToPath(import.meta.url);
@@ -193,6 +193,20 @@ async function main(): Promise<void> {
   const skillNames = scanned.map(s => s.name);
   const skillSummaries = scanSkillSummaries(builtInDir, userDir);
   const agentSkillSummaries = scanAgentSkillSummaries(builtInDir, userDir);
+
+  // Auto-configure MarketOnePager MCP server when MARKETONEPAGER_KEY is set
+  const marketonepagerKey = process.env.MARKETONEPAGER_KEY;
+  if (marketonepagerKey) {
+    const marketonepagerUrl = process.env.MARKETONEPAGER_URL ?? 'http://localhost:8001/mcp';
+    const alreadyConfigured = config.mcp.servers.some(s => s.name === 'marketonepager');
+    if (!alreadyConfigured) {
+      config.mcp.servers.push({
+        name: 'marketonepager',
+        url: marketonepagerUrl,
+        headers: { Authorization: `Bearer ${marketonepagerKey}` },
+      });
+    }
+  }
 
   // Initialize MCP servers (if configured)
   let mcpClient: MCPClientManager | undefined;

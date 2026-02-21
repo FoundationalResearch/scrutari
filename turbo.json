@@ -17,6 +17,10 @@
       "dependsOn": ["^build"],
       "inputs": ["src/**/*", "tsconfig.json"]
     },
+    "test": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
     "clean": {
       "cache": false
     }
