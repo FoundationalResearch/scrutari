@@ -59,7 +59,7 @@ That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY`, `OP
 ### Example session
 
 ```
-╭─ scrutari v0.2.2 ────────────────────────────────────────────────────╮
+╭─ scrutari v0.3.0 ────────────────────────────────────────────────────╮
 │                                                                      │
 │  Welcome, user!               │ Tips for getting started             │
 │                               │ "analyze NVDA" run a deep analysis   │
