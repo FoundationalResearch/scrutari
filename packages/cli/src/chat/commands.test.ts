@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSlashCommand } from './commands.js';
+import { parseSlashCommand, getCommandList, filterCommands } from './commands.js';
 
 describe('parseSlashCommand', () => {
   it('returns null for non-slash input', () => {
@@ -127,6 +127,11 @@ describe('parseSlashCommand', () => {
     expect(result).toEqual({ type: 'proceed', args: '', raw: '/PROCEED' });
   });
 
+  it('parses /tools', () => {
+    const result = parseSlashCommand('/tools');
+    expect(result).toEqual({ type: 'tools', args: '', raw: '/tools' });
+  });
+
   it('parses /read-only', () => {
     const result = parseSlashCommand('/read-only');
     expect(result).toEqual({ type: 'read-only', args: '', raw: '/read-only' });
@@ -140,5 +145,71 @@ describe('parseSlashCommand', () => {
   it('parses /read-only with args', () => {
     const result = parseSlashCommand('/read-only off');
     expect(result).toEqual({ type: 'read-only', args: 'off', raw: '/read-only off' });
+  });
+});
+
+describe('getCommandList', () => {
+  it('returns built-in commands when no skills', () => {
+    const list = getCommandList([]);
+    expect(list.some(c => c.name === 'plan')).toBe(true);
+    expect(list.some(c => c.name === 'help')).toBe(true);
+    expect(list.length).toBe(12);
+  });
+
+  it('appends skill names as commands', () => {
+    const list = getCommandList(['deep-dive', 'comp-analysis']);
+    expect(list.some(c => c.name === 'deep-dive')).toBe(true);
+    expect(list.some(c => c.name === 'comp-analysis')).toBe(true);
+    expect(list.length).toBe(14);
+  });
+
+  it('skill commands have type unknown', () => {
+    const list = getCommandList(['deep-dive']);
+    const skill = list.find(c => c.name === 'deep-dive');
+    expect(skill?.type).toBe('unknown');
+  });
+});
+
+describe('filterCommands', () => {
+  const commands = getCommandList(['deep-dive', 'comp-analysis']);
+
+  it('returns all commands when query is empty', () => {
+    expect(filterCommands(commands, '')).toEqual(commands);
+  });
+
+  it('filters by prefix match', () => {
+    const result = filterCommands(commands, 'pl');
+    expect(result.length).toBe(1);
+    expect(result[0].name).toBe('plan');
+  });
+
+  it('filters to tools command', () => {
+    const result = filterCommands(commands, 'to');
+    expect(result.length).toBe(1);
+    expect(result[0].name).toBe('tools');
+  });
+
+  it('matches multiple commands with shared prefix', () => {
+    const result = filterCommands(commands, 'co');
+    const names = result.map(c => c.name);
+    expect(names).toContain('compact');
+    expect(names).toContain('context');
+    expect(names).toContain('comp-analysis');
+  });
+
+  it('matches aliases', () => {
+    const result = filterCommands(commands, 'dryr');
+    expect(result.length).toBe(1);
+    expect(result[0].name).toBe('dry-run');
+  });
+
+  it('is case-insensitive', () => {
+    const result = filterCommands(commands, 'PL');
+    expect(result.length).toBe(1);
+    expect(result[0].name).toBe('plan');
+  });
+
+  it('returns empty array when nothing matches', () => {
+    expect(filterCommands(commands, 'zzz')).toEqual([]);
   });
 });

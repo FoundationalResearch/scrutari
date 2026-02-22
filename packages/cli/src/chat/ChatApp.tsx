@@ -15,13 +15,14 @@ import { InputPrompt } from './components/InputPrompt.js';
 import { ApprovalPrompt } from './components/ApprovalPrompt.js';
 import { ToolPermissionPrompt } from './components/ToolPermissionPrompt.js';
 import { SkillBrowser, type SkillDetail } from './components/SkillBrowser.js';
+import { ToolBrowser, type BuiltInToolGroup, type BuiltInMcpServer } from './components/ToolBrowser.js';
 import { useSession } from './hooks/useSession.js';
 import { useOrchestrator } from './hooks/useOrchestrator.js';
 import { useCompaction } from './hooks/useCompaction.js';
 import { ContextUsageBar } from './components/ContextUsageBar.js';
 import { BudgetDisplay } from './components/BudgetDisplay.js';
 import { estimateTokens } from '@scrutari/core';
-import { parseSlashCommand } from './commands.js';
+import { parseSlashCommand, getCommandList } from './commands.js';
 import { parseSkillCommand, buildSkillMessage } from './skill-command.js';
 import { randomUUID } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
@@ -130,6 +131,21 @@ export function ChatApp({
     saveMemory(mem);
   }, [userMemory, contextBundle]);
 
+  const commands = useMemo(() => getCommandList(skillNames), [skillNames]);
+
+  const handleEscapeMode = useCallback(() => {
+    if (planMode) {
+      setPlanMode(false);
+      addSystemMessage('Plan mode disabled.');
+    } else if (dryRun) {
+      setDryRun(false);
+      addSystemMessage('Dry-run mode disabled.');
+    } else if (readOnly) {
+      setReadOnly(false);
+      addSystemMessage('Read-only mode disabled.');
+    }
+  }, [planMode, dryRun, readOnly, addSystemMessage]);
+
   const {
     isProcessing,
     streamingMessageId,
@@ -163,6 +179,7 @@ export function ChatApp({
 
   const [ctrlCCount, setCtrlCCount] = useState(0);
   const [showSkillBrowser, setShowSkillBrowser] = useState(false);
+  const [showToolBrowser, setShowToolBrowser] = useState(false);
 
   // Reset Ctrl+C counter when processing state changes
   useEffect(() => {
@@ -325,8 +342,11 @@ export function ChatApp({
       case 'skills':
         setShowSkillBrowser(true);
         break;
+      case 'tools':
+        setShowToolBrowser(true);
+        break;
       case 'help':
-        addSystemMessage('Available commands: /plan — toggle plan mode, /proceed — exit plan mode and execute the plan, /dry-run — toggle dry-run mode, /read-only — toggle read-only mode, /compact [instructions] — compact context window, /skills — browse skills, /activate <name> — activate an agent skill, /persona [name|off] — switch persona, /instruct <text> — set session instructions, /context — show active context, /help — show this help. You can also type /<skill-name> [args] to run a skill directly.');
+        addSystemMessage('Available commands: /plan — toggle plan mode, /proceed — exit plan mode and execute the plan, /dry-run — toggle dry-run mode, /read-only — toggle read-only mode, /compact [instructions] — compact context window, /skills — browse skills, /tools — show tools and MCP servers, /activate <name> — activate an agent skill, /persona [name|off] — switch persona, /instruct <text> — set session instructions, /context — show active context, /help — show this help. You can also type /<skill-name> [args] to run a skill directly.\n\nTips: Type / to see all commands with autocomplete. Use TAB to complete, arrows to navigate. Press ESC to exit plan/dry-run/read-only mode.');
         break;
       default: {
         // Try matching as a skill command (e.g., /deepdive NVDA --depth full)
@@ -382,6 +402,41 @@ export function ChatApp({
     }
   }, []);
 
+  const builtInToolGroups: BuiltInToolGroup[] = useMemo(() => [
+    {
+      group: 'edgar',
+      tools: [
+        { name: 'edgar_search_filings', description: 'Search SEC EDGAR for company filings' },
+        { name: 'edgar_get_filing', description: 'Fetch content of a specific SEC filing' },
+        { name: 'edgar_get_financials', description: 'Fetch structured financial data (XBRL)' },
+      ],
+    },
+    {
+      group: 'market-data',
+      tools: [
+        { name: 'market_data_get_quote', description: 'Get current stock quote data' },
+        { name: 'market_data_get_history', description: 'Get historical price data' },
+        { name: 'market_data_get_financials', description: 'Get financial statements' },
+      ],
+    },
+    {
+      group: 'news',
+      tools: [
+        { name: 'news_search', description: 'Search for recent news articles' },
+      ],
+    },
+  ], []);
+
+  const builtInMcpServers: BuiltInMcpServer[] = useMemo(() => [
+    {
+      name: 'marketonepager',
+      description: 'Financial data API — balance sheets, income statements, metrics, and more.',
+      envVar: 'MARKETONEPAGER_KEY',
+      urlEnvVar: 'MARKETONEPAGER_URL',
+      defaultUrl: 'http://localhost:8001/mcp',
+    },
+  ], []);
+
   const sessionInfo = continueSession || resumeId
     ? session.title
     : undefined;
@@ -397,6 +452,20 @@ export function ChatApp({
           }}
           onClose={() => setShowSkillBrowser(false)}
           loadDetail={loadSkillDetail}
+        />
+      </Box>
+    );
+  }
+
+  if (showToolBrowser) {
+    return (
+      <Box flexDirection="column">
+        <ToolBrowser
+          builtInGroups={builtInToolGroups}
+          builtInMcpServers={builtInMcpServers}
+          mcpServers={mcpClient?.getServerInfos() ?? []}
+          configuredServerNames={config.mcp.servers.map(s => s.name)}
+          onClose={() => setShowToolBrowser(false)}
         />
       </Box>
     );
@@ -437,7 +506,15 @@ export function ChatApp({
           onDeny={() => handleToolPermission(false)}
         />
       ) : (
-        <InputPrompt onSubmit={handleInput} disabled={isProcessing} planMode={planMode} readOnly={readOnly} />
+        <InputPrompt
+          onSubmit={handleInput}
+          disabled={isProcessing}
+          planMode={planMode}
+          dryRun={dryRun}
+          readOnly={readOnly}
+          onEscapeMode={handleEscapeMode}
+          commands={commands}
+        />
       )}
     </Box>
   );
