@@ -16,7 +16,7 @@ import { listSessions } from './chat/session/storage.js';
 import { scanSkillFiles, scanSkillSummaries, scanAgentSkillSummaries, HookManager } from '@scrutari/core';
 import { MCPClientManager } from '@scrutari/mcp';
 
-const VERSION = '0.2.1';
+const VERSION = '0.3.0';
 
 function getBuiltInSkillsDir(): string {
   const thisFile = fileURLToPath(import.meta.url);
