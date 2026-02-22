@@ -20,7 +20,7 @@ export function MessageList({ messages, streamingMessageId, verbose }: MessageLi
         return (
           <Box key={msg.id} flexDirection="column" marginBottom={0}>
             {msg.thinking && !hasSegments && (
-              <ThinkingBlock content={msg.thinking} verbose={verbose} />
+              <ThinkingBlock content={msg.thinking} verbose={verbose} isStreaming={msg.id === streamingMessageId} />
             )}
             <MessageBubble
               message={msg}

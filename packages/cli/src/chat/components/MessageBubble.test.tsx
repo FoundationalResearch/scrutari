@@ -47,11 +47,11 @@ describe('MessageBubble', () => {
   });
 
   describe('inline thinking', () => {
-    it('shows one-line summary when not verbose', () => {
+    it('collapses to summary when not streaming', () => {
       const msg = makeMessage({
         content: 'Result',
         thinkingSegments: [{
-          content: 'This is a long reasoning line that should be truncated\nAnd a second line\nAnd a third',
+          content: 'This is a long reasoning line\nAnd a second line\nAnd a third',
           toolCallId: 'tc-1',
         }],
         toolCalls: [{
@@ -63,13 +63,12 @@ describe('MessageBubble', () => {
       });
       const { lastFrame } = render(<MessageBubble message={msg} verbose={false} />);
       const output = lastFrame();
-      // Should show first line (possibly truncated) but not second/third
-      expect(output).toContain('This is a long reasoning');
-      expect(output).not.toContain('And a second line');
-      expect(output).not.toContain('And a third');
+      expect(output).toContain('Thought');
+      expect(output).toContain('3 lines');
+      expect(output).not.toContain('This is a long reasoning line');
     });
 
-    it('shows all lines when verbose', () => {
+    it('shows live content when streaming', () => {
       const msg = makeMessage({
         content: 'Result',
         thinkingSegments: [{
@@ -83,19 +82,18 @@ describe('MessageBubble', () => {
           status: 'done',
         }],
       });
-      const { lastFrame } = render(<MessageBubble message={msg} verbose />);
+      const { lastFrame } = render(<MessageBubble message={msg} isStreaming verbose />);
       const output = lastFrame();
       expect(output).toContain('Line 1');
       expect(output).toContain('Line 2');
       expect(output).toContain('Line 3');
     });
 
-    it('truncates first line to 80 chars when not verbose', () => {
-      const longLine = 'A'.repeat(100);
+    it('shows singular line count for single-line thinking', () => {
       const msg = makeMessage({
         content: 'Result',
         thinkingSegments: [{
-          content: longLine,
+          content: 'Just one thought',
           toolCallId: 'tc-1',
         }],
         toolCalls: [{
@@ -105,12 +103,9 @@ describe('MessageBubble', () => {
           status: 'done',
         }],
       });
-      const { lastFrame } = render(<MessageBubble message={msg} verbose={false} />);
+      const { lastFrame } = render(<MessageBubble message={msg} />);
       const output = lastFrame();
-      // Should contain truncated text with ...
-      expect(output).toContain('...');
-      // Should not contain the full 100-char line
-      expect(output).not.toContain(longLine);
+      expect(output).toContain('1 line');
     });
   });
 

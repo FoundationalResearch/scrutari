@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
 import type { ChatMessage, ThinkingSegment, ToolCallInfo } from '../types.js';
+import { MarkdownText } from './MarkdownText.js';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -29,25 +30,30 @@ function ToolCallStatus({ toolCall }: { toolCall: ToolCallInfo }): React.ReactEl
   );
 }
 
-function InlineThinking({ segment, verbose }: { segment: ThinkingSegment; verbose?: boolean }): React.ReactElement {
-  if (verbose) {
-    const lines = segment.content.split('\n');
+function InlineThinking({ segment, verbose, isStreaming }: { segment: ThinkingSegment; verbose?: boolean; isStreaming?: boolean }): React.ReactElement {
+  // Collapsed: show one-line summary after streaming completes
+  if (!isStreaming) {
+    const lineCount = segment.content.split('\n').length;
     return (
-      <Box flexDirection="column" marginLeft={2} marginBottom={0}>
-        {lines.map((line, i) => (
-          <Text key={i} color="yellow" dimColor>{line}</Text>
-        ))}
+      <Box marginLeft={2} marginBottom={0}>
+        <Text dimColor italic>{'\u25B8'} Thought ({lineCount} {lineCount === 1 ? 'line' : 'lines'})</Text>
       </Box>
     );
   }
 
-  // Non-verbose: show one-line summary
-  const firstLine = segment.content.split('\n')[0];
-  const summary = firstLine.length > 80 ? firstLine.slice(0, 77) + '...' : firstLine;
+  // Streaming: show live content
+  const lines = segment.content.split('\n');
+  const displayLines = verbose ? lines : lines.slice(-4);
+  const truncated = !verbose && lines.length > 4;
 
   return (
-    <Box marginLeft={2} marginBottom={0}>
-      <Text color="yellow" dimColor>{summary}</Text>
+    <Box flexDirection="column" marginLeft={2} marginBottom={0}>
+      {truncated && (
+        <Text dimColor italic>... ({lines.length - 4} earlier lines)</Text>
+      )}
+      {displayLines.map((line, i) => (
+        <Text key={i} dimColor italic>{line}</Text>
+      ))}
     </Box>
   );
 }
@@ -93,7 +99,7 @@ export function MessageBubble({ message, isStreaming, verbose }: MessageBubblePr
             const seg = segmentsByToolCall.get(tc.id);
             return (
               <Box key={tc.id} flexDirection="column">
-                {seg && <InlineThinking segment={seg} verbose={verbose} />}
+                {seg && <InlineThinking segment={seg} verbose={verbose} isStreaming={isStreaming} />}
                 <ToolCallStatus toolCall={tc} />
               </Box>
             );
@@ -101,8 +107,10 @@ export function MessageBubble({ message, isStreaming, verbose }: MessageBubblePr
         </Box>
       )}
       {message.content && (
-        <Box>
-          <Text>{message.content}</Text>
+        <Box flexDirection="column">
+          <MarkdownText isStreaming={isStreaming}>
+            {message.content}
+          </MarkdownText>
           {isStreaming && <Text color="cyan">{'\u2588'}</Text>}
         </Box>
       )}

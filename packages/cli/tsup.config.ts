@@ -28,6 +28,8 @@ export default defineConfig({
     'ink',
     'ink-spinner',
     'ink-text-input',
+    'marked',
+    'marked-terminal',
     'react',
     'yaml',
     'zod',
