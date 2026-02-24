@@ -130,18 +130,8 @@ export function buildSystemPrompt(config: Config, skillNames: string[], mcpTools
     : '';
 
   // Build tool list dynamically — only include tools whose API keys are configured
+  // Direct lookup tools first so the LLM considers them before pipeline tools
   const toolDocs: string[] = [];
-
-  toolDocs.push(`**run_pipeline** — Run a skill-based analysis pipeline. Use this for deep analysis.
-   - Requires: skill (string), inputs (object — key-value pairs matching the skill's input schema)
-   - Optional: budget (number), model (string — override the model for all stages; omit to use each stage's configured model)
-   - Use list_skills to see what inputs each skill requires.
-   - Example: run_pipeline({ skill: "deep-dive", inputs: { ticker: "NVDA" } })
-   - Example: run_pipeline({ skill: "comp-analysis", inputs: { tickers: ["AAPL", "NVDA", "MSFT"] } })`);
-
-  toolDocs.push(`**list_skills** — List all available analysis skills. Use when the user asks what you can do or what skills are available. Pass detail=true for full info.`);
-
-  toolDocs.push(`**get_skill_detail** — Get detailed info about a specific skill (inputs, stages, tools, cost estimate). Use when the user asks about a particular skill.`);
 
   if (config.tools.market_data.api_key) {
     toolDocs.push(`**get_quote** — Get a real-time stock quote. Use for quick price checks (e.g., "what is AAPL trading at?").
@@ -155,6 +145,17 @@ export function buildSystemPrompt(config: Config, skillNames: string[], mcpTools
     toolDocs.push(`**search_news** — Search for financial news articles. Use when the user asks about recent news.
    - Requires: query (string)`);
   }
+
+  toolDocs.push(`**run_pipeline** — Run a multi-stage analysis pipeline for in-depth research. Only use when the user asks for comprehensive analysis, comparison, or research — never for simple price checks or data lookups.
+   - Requires: skill (string), inputs (object — key-value pairs matching the skill's input schema)
+   - Optional: budget (number), model (string — override the model for all stages; omit to use each stage's configured model)
+   - Use list_skills to see what inputs each skill requires.
+   - Example: run_pipeline({ skill: "deep-dive", inputs: { ticker: "NVDA" } })
+   - Example: run_pipeline({ skill: "comp-analysis", inputs: { tickers: ["AAPL", "NVDA", "MSFT"] } })`);
+
+  toolDocs.push(`**list_skills** — List all available analysis skills. Use when the user asks what you can do or what skills are available. Pass detail=true for full info.`);
+
+  toolDocs.push(`**get_skill_detail** — Get detailed info about a specific skill (inputs, stages, tools, cost estimate). Use when the user asks about a particular skill.`);
 
   toolDocs.push(`**manage_config** — View or update scrutari configuration.
    - action: 'show' to display current config, 'set' to update a value`);
@@ -197,8 +198,10 @@ ${agentSkillList ? `\n## Agent Skills\n\nAgent skills provide domain expertise a
 - Budget: $${config.defaults.max_budget_usd.toFixed(2)}
 ${options.contextBundle ? '\n' + buildContextSection(options.contextBundle) + '\n' : ''}
 ## Guidelines
-- When the user asks to analyze a stock or run a pipeline, use run_pipeline with the appropriate skill and inputs.
-- Default skill is "deep-dive" unless the user specifies otherwise.${config.tools.market_data.api_key ? '\n- For simple price queries, use get_quote instead of running a full pipeline.' : ''}
+- For simple data lookups (stock price, quote, filing search, news), ALWAYS use the direct tools (${dataLookupTools.join(', ')}). NEVER use run_pipeline for these.
+- Only use run_pipeline when the user explicitly asks for in-depth analysis, research, comparison, deep dive, or thesis generation.
+- Default skill is "deep-dive" when the user does ask for analysis.
+- If a direct tool is not available (e.g., no API key configured), tell the user rather than falling back to run_pipeline.
 - Be concise in responses. Show key findings clearly.
 - If a tool fails, explain the error and suggest alternatives.
 - When presenting analysis results, format them clearly with headers and bullet points.

@@ -162,7 +162,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
 
   const allTools = {
     run_pipeline: {
-      description: 'Run a skill-based analysis pipeline. Pass inputs matching the skill\'s declared input schema.',
+      description: 'Run a multi-stage analysis pipeline for in-depth research (deep dives, competitive analysis, earnings reviews). NOT for simple data lookups — use get_quote, search_filings, or search_news instead.',
       inputSchema: z.object({
         skill: z.string().default('deep-dive').describe('Analysis skill to use'),
         inputs: z.record(
