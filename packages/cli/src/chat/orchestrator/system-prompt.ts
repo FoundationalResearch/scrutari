@@ -198,9 +198,8 @@ ${agentSkillList ? `\n## Agent Skills\n\nAgent skills provide domain expertise a
 - Budget: $${config.defaults.max_budget_usd.toFixed(2)}
 ${options.contextBundle ? '\n' + buildContextSection(options.contextBundle) + '\n' : ''}
 ## Guidelines
-- For simple data lookups (stock price, quote, filing search, news), ALWAYS use the direct tools (${dataLookupTools.join(', ')}). NEVER use run_pipeline for these.
-- Only use run_pipeline when the user explicitly asks for in-depth analysis, research, comparison, deep dive, or thesis generation.
-- Default skill is "deep-dive" when the user does ask for analysis.
+- If the user's query can be answered with a single tool call (${dataLookupTools.join(', ')}), use that tool directly. Only use run_pipeline when the answer requires synthesizing multiple data sources or multi-step research.
+- Default skill is "deep-dive" when run_pipeline is appropriate.
 - If a direct tool is not available (e.g., no API key configured), tell the user rather than falling back to run_pipeline.
 - Be concise in responses. Show key findings clearly.
 - If a tool fails, explain the error and suggest alternatives.
