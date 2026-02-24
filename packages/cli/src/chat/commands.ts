@@ -1,4 +1,4 @@
-export type SlashCommandType = 'plan' | 'dry-run' | 'proceed' | 'read-only' | 'persona' | 'instruct' | 'context' | 'skills' | 'tools' | 'compact' | 'activate' | 'help' | 'unknown';
+export type SlashCommandType = 'plan' | 'dry-run' | 'proceed' | 'read-only' | 'persona' | 'instruct' | 'context' | 'skills' | 'tools' | 'mcp' | 'compact' | 'activate' | 'help' | 'unknown';
 
 export interface SlashCommand {
   type: SlashCommandType;
@@ -20,6 +20,7 @@ const BUILT_IN_COMMANDS: CommandInfo[] = [
   { name: 'read-only', aliases: ['readonly'], description: 'Toggle read-only mode', type: 'read-only' },
   { name: 'skills', description: 'Browse available skills', type: 'skills' },
   { name: 'tools', description: 'Show configured tools and MCP servers', type: 'tools' },
+  { name: 'mcp', description: 'Show MCP server status', type: 'mcp' },
   { name: 'activate', description: 'Activate an agent skill', type: 'activate' },
   { name: 'persona', description: 'Switch persona', type: 'persona' },
   { name: 'instruct', description: 'Set session instructions', type: 'instruct' },
@@ -80,6 +81,7 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     'context': 'context',
     'skills': 'skills',
     'tools': 'tools',
+    'mcp': 'mcp',
     'compact': 'compact',
     'activate': 'activate',
     'help': 'help',

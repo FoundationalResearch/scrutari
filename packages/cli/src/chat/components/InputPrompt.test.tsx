@@ -113,6 +113,21 @@ describe('InputPrompt autocomplete', () => {
     expect(onEscapeMode).toHaveBeenCalledTimes(1);
   });
 
+  it('submits selected command on Enter when menu is open', async () => {
+    const onSubmit = vi.fn();
+    const { stdin } = render(
+      <InputPrompt onSubmit={onSubmit} commands={commands} />
+    );
+    await new Promise(r => setTimeout(r, 50));
+    // Type partial command that matches /tools
+    stdin.write('/too');
+    await new Promise(r => setTimeout(r, 50));
+    // Press Enter — should submit /tools, not /too
+    stdin.write('\r');
+    await new Promise(r => setTimeout(r, 50));
+    expect(onSubmit).toHaveBeenCalledWith('/tools');
+  });
+
   it('dismisses menu on first ESC instead of calling onEscapeMode', async () => {
     const onEscapeMode = vi.fn();
     const { lastFrame, stdin } = render(

@@ -44,6 +44,10 @@ export OPENAI_API_KEY=sk-...
 export GEMINI_API_KEY=...
 # or
 export MINIMAX_API_KEY=...
+
+# Optional: enable market data tools (stock quotes, historical prices, financials)
+export RAPIDAPI_KEY=...   # from https://rapidapi.com/apidojo/api/yahoo-finance1
+
 npx @foundationalresearch/scrutari
 ```
 
@@ -59,7 +63,7 @@ That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY`, `OP
 ### Example session
 
 ```
-╭─ scrutari v0.3.0 ────────────────────────────────────────────────────╮
+╭─ scrutari v0.3.1 ────────────────────────────────────────────────────╮
 │                                                                      │
 │  Welcome, user!               │ Tips for getting started             │
 │                               │ "analyze NVDA" run a deep analysis   │
@@ -187,7 +191,7 @@ Scrutari ships with data integration tools that the orchestrator and pipeline st
 | Tool Group | Tools | Data Source |
 |-----------|-------|-------------|
 | **edgar** | `edgar_search_filings`, `edgar_get_filing`, `edgar_get_financials` | SEC EDGAR (10-K, 10-Q, 8-K filings, XBRL financials) |
-| **market-data** | `market_data_get_quote`, `market_data_get_history`, `market_data_get_financials` | Yahoo Finance (price, volume, market cap, historical OHLCV, financial statements) |
+| **market-data** | `market_data_get_quote`, `market_data_get_history`, `market_data_get_financials` | Yahoo Finance via [RapidAPI](https://rapidapi.com/apidojo/api/yahoo-finance1) (price, volume, market cap, historical OHLCV, financial statements). Requires `RAPIDAPI_KEY`. |
 | **news** | `news_search` | Brave Search (recent news with configurable lookback window) |
 
 Tools handle rate limiting, retries with exponential backoff, and stale cache fallback automatically.
@@ -259,6 +263,10 @@ compaction:
   auto_threshold: 0.85                 # trigger at 85% of context window
   preserve_turns: 4                    # keep last 4 turns (8 messages) verbatim
   model: claude-haiku-3-5-20241022     # cheap model for summarization
+
+tools:
+  market_data:
+    api_key: env:RAPIDAPI_KEY          # RapidAPI key for Yahoo Finance market data
 
 mcp:
   servers: []
@@ -419,6 +427,8 @@ This data is injected into the system prompt so the LLM can personalize response
 | `/dry-run` | Toggle dry-run mode (estimate costs without executing) |
 | `/read-only` | Toggle read-only mode (only data lookups, no writes) |
 | `/skills` | Browse available skills interactively |
+| `/tools` | Show configured tools and MCP servers |
+| `/mcp` | Show MCP server connection status |
 | `/help` | Show available commands |
 | `/<skill> [args]` | Run a skill directly (e.g., `/deep-dive NVDA`) |
 
@@ -584,6 +594,34 @@ scrutari skill validate ~/.scrutari/skills/my-analysis/
 
 Extend Scrutari with external data sources via the [Model Context Protocol](https://modelcontextprotocol.io/):
 
+### Adding Servers via CLI
+
+```bash
+# Stdio transport (local process)
+scrutari mcp add my-server -- npx -y @some/mcp-server
+
+# HTTP transport (remote server)
+scrutari mcp add --transport http my-api http://localhost:3001/mcp
+
+# With environment variables for the server process
+scrutari mcp add --env API_KEY=xxx my-server -- node server.js
+
+# With auth headers for HTTP
+scrutari mcp add --transport http --header "Authorization: Bearer tok" my-api http://api.example.com/mcp
+
+# From a JSON blob
+scrutari mcp add-json bloomberg '{"command":"npx","args":["-y","@bloomberg/mcp-server"]}'
+
+# List, inspect, remove
+scrutari mcp list
+scrutari mcp get my-server
+scrutari mcp remove my-server
+```
+
+### Manual Configuration
+
+You can also edit `~/.scrutari/config.yaml` directly:
+
 ```yaml
 mcp:
   servers:
@@ -593,9 +631,18 @@ mcp:
 
     - name: custom-data
       url: http://localhost:3001/mcp
+      headers:
+        Authorization: Bearer your-token
+
+    - name: market-api
+      url: http://localhost:8001/mcp
+      headers:
+        X-API-Key: your-api-key
+      injectedParams:          # auto-injected into every tool call (hidden from the LLM)
+        api_key: your-api-key
 ```
 
-MCP tools are automatically registered and can be referenced in skill `tools` fields by server name. Servers support both **stdio** (local process) and **HTTP/SSE** (remote) transports with automatic timeout (30s) and retry on transient failures.
+MCP tools are automatically registered and can be referenced in skill `tools` fields by server name. Servers support both **stdio** (local process) and **HTTP/SSE** (remote) transports with automatic timeout (30s) and retry on transient failures. Use `injectedParams` to auto-inject parameters (like API keys) into every tool call — they are stripped from the schema so the LLM never sees them.
 
 ### MarketOnePager
 
@@ -618,6 +665,7 @@ No config file changes needed — Scrutari will automatically connect to the Mar
 ```
 scrutari [options]
 scrutari skill <subcommand> [args]
+scrutari mcp <subcommand> [args]
 
 Options:
   --continue          Resume the most recent session
@@ -635,6 +683,11 @@ Subcommands:
   skill create        Interactive skill creation wizard
   skill validate      Validate a skill YAML file or agent skill directory
   skill install       Install a skill from a URL or GitHub shorthand
+  mcp add             Add an MCP server (stdio or HTTP)
+  mcp add-json        Add an MCP server from a JSON blob
+  mcp list            List configured MCP servers
+  mcp get             Show details for a specific server
+  mcp remove          Remove an MCP server
 
 Examples:
   scrutari                              Open interactive chat
@@ -643,6 +696,8 @@ Examples:
   scrutari --persona equity-analyst     Start with equity-analyst persona
   scrutari skill list                   List all skills
   scrutari skill install user/repo/my-skill
+  scrutari mcp add my-server -- npx -y @some/mcp
+  scrutari mcp list
 ```
 
 ### Keyboard shortcuts

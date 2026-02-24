@@ -42,6 +42,8 @@ const mcpServerSchema = z.object({
   args: z.array(z.string()).optional(),
   url: z.string().url().optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  injectedParams: z.record(z.string(), z.string()).optional(),
 }).strict().superRefine((server, ctx) => {
   const hasCommand = typeof server.command === 'string' && server.command.length > 0;
   const hasUrl = typeof server.url === 'string' && server.url.length > 0;
@@ -91,6 +93,25 @@ const permissionLevelSchema = z.enum(['auto', 'confirm', 'deny']);
 
 const permissionsSchema = z.record(z.string(), permissionLevelSchema).optional();
 
+const marketDataToolsSchema = z.object({
+  api_key: apiKeySchema.optional(),
+}).strict();
+
+const marketonepagerToolsSchema = z.object({
+  api_key: apiKeySchema.optional(),
+  url: z.string().optional(),
+}).strict();
+
+const newsToolsSchema = z.object({
+  api_key: apiKeySchema.optional(),
+}).strict();
+
+const toolsSchema = z.object({
+  market_data: marketDataToolsSchema.optional(),
+  marketonepager: marketonepagerToolsSchema.optional(),
+  news: newsToolsSchema.optional(),
+}).strict();
+
 const ConfigSchema = z.object({
   providers: providersSchema.optional(),
   defaults: defaultsSchema.optional(),
@@ -99,6 +120,7 @@ const ConfigSchema = z.object({
   agents: agentsSchema.optional(),
   compaction: compactionSchema.optional(),
   permissions: permissionsSchema,
+  tools: toolsSchema.optional(),
 }).strict();
 
 export type RawConfig = z.infer<typeof ConfigSchema>;
@@ -118,6 +140,8 @@ export interface ResolvedMcpServerConfig {
   args?: string[];
   url?: string;
   headers?: Record<string, string>;
+  env?: Record<string, string>;
+  injectedParams?: Record<string, string>;
 }
 
 export interface AgentConfigEntry {
@@ -161,6 +185,18 @@ export interface Config {
   };
   compaction: CompactionConfig;
   permissions: Record<string, PermissionLevel>;
+  tools: {
+    market_data: {
+      api_key?: string;
+    };
+    marketonepager: {
+      api_key?: string;
+      url?: string;
+    };
+    news: {
+      api_key?: string;
+    };
+  };
 }
 
 export const ConfigDefaults: Config = {
@@ -204,6 +240,11 @@ export const ConfigDefaults: Config = {
     model: 'claude-haiku-3-5-20241022',
   },
   permissions: {},
+  tools: {
+    market_data: {},
+    marketonepager: {},
+    news: {},
+  },
 };
 
 export { ConfigSchema };

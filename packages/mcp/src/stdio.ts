@@ -15,6 +15,6 @@ export function createStdioTransport(config: MCPServerConfig): Transport {
   return new StdioClientTransport({
     command: config.command,
     args: config.args,
-    env: { ...process.env } as Record<string, string>,
+    env: { ...process.env, ...config.env } as Record<string, string>,
   });
 }

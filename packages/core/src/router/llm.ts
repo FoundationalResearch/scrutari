@@ -1,4 +1,4 @@
-import { generateText, streamText, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
+import { generateText, streamText, stepCountIs, type LanguageModel, type ModelMessage, type ToolSet } from 'ai';
 import { calculateCost, CostTracker, BudgetExceededError } from './cost.js';
 import { withRetry, type RetryConfig, BudgetExceededRetryError } from './retry.js';
 
@@ -21,6 +21,8 @@ export interface LLMCallOptions {
   retry?: RetryConfig;
   /** Abort signal for cancellation. */
   abortSignal?: AbortSignal;
+  /** Maximum number of tool-use steps for multi-step agent loops. */
+  maxToolSteps?: number;
 }
 
 export interface LLMToolCall {
@@ -74,6 +76,8 @@ export async function callLLM(options: LLMCallOptions): Promise<LLMResponse> {
         }
       }
 
+      const useMultiStep = options.tools && options.maxToolSteps && options.maxToolSteps > 1;
+
       const result = await generateText({
         model: options.model,
         system: options.system,
@@ -82,10 +86,13 @@ export async function callLLM(options: LLMCallOptions): Promise<LLMResponse> {
         maxOutputTokens: options.maxOutputTokens,
         temperature: options.temperature,
         abortSignal: options.abortSignal,
+        ...(useMultiStep ? { stopWhen: stepCountIs(options.maxToolSteps!) } : {}),
       });
 
-      const inputTokens = result.usage.inputTokens ?? 0;
-      const outputTokens = result.usage.outputTokens ?? 0;
+      // Use totalUsage for multi-step (aggregates across all steps)
+      const usage = useMultiStep ? result.totalUsage : result.usage;
+      const inputTokens = usage.inputTokens ?? 0;
+      const outputTokens = usage.outputTokens ?? 0;
       const costUsd = calculateCost(options.modelId, inputTokens, outputTokens);
 
       if (options.budget) {

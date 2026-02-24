@@ -146,6 +146,16 @@ describe('parseSlashCommand', () => {
     const result = parseSlashCommand('/read-only off');
     expect(result).toEqual({ type: 'read-only', args: 'off', raw: '/read-only off' });
   });
+
+  it('parses /mcp', () => {
+    const result = parseSlashCommand('/mcp');
+    expect(result).toEqual({ type: 'mcp', args: '', raw: '/mcp' });
+  });
+
+  it('parses /MCP case-insensitively', () => {
+    const result = parseSlashCommand('/MCP');
+    expect(result).toEqual({ type: 'mcp', args: '', raw: '/MCP' });
+  });
 });
 
 describe('getCommandList', () => {
@@ -153,14 +163,14 @@ describe('getCommandList', () => {
     const list = getCommandList([]);
     expect(list.some(c => c.name === 'plan')).toBe(true);
     expect(list.some(c => c.name === 'help')).toBe(true);
-    expect(list.length).toBe(12);
+    expect(list.length).toBe(13);
   });
 
   it('appends skill names as commands', () => {
     const list = getCommandList(['deep-dive', 'comp-analysis']);
     expect(list.some(c => c.name === 'deep-dive')).toBe(true);
     expect(list.some(c => c.name === 'comp-analysis')).toBe(true);
-    expect(list.length).toBe(14);
+    expect(list.length).toBe(15);
   });
 
   it('skill commands have type unknown', () => {

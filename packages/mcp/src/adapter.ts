@@ -178,20 +178,45 @@ async function withMCPTimeout<T>(
 }
 
 /**
+ * Build a Zod schema that omits keys present in `injectedParams`.
+ * Returns the original schema unchanged when no keys overlap.
+ */
+function stripInjectedKeys(
+  schema: z.ZodObject<z.ZodRawShape>,
+  keysToStrip: string[],
+): z.ZodObject<z.ZodRawShape> {
+  if (keysToStrip.length === 0) return schema;
+  const shape = schema.shape;
+  const stripped: z.ZodRawShape = {};
+  for (const [key, value] of Object.entries(shape)) {
+    if (!keysToStrip.includes(key)) {
+      stripped[key] = value;
+    }
+  }
+  return z.object(stripped);
+}
+
+/**
  * Adapts an MCP tool into a scrutari-compatible tool definition.
  * Includes a 30-second timeout and one retry on transient errors.
  *
  * @param serverName - The MCP server name (used for namespacing)
  * @param tool - The MCP tool definition
  * @param callTool - Function to call the tool on the MCP server
+ * @param injectedParams - Parameters to auto-inject into every call (stripped from the schema the LLM sees)
  */
 export function adaptMCPTool(
   serverName: string,
   tool: MCPTool,
   callTool: (toolName: string, args: Record<string, unknown>) => Promise<MCPToolResult>,
+  injectedParams?: Record<string, string>,
 ): AdaptedToolDefinition {
   const qualifiedName = `${serverName}/${tool.name}`;
-  const parameters = jsonSchemaToZod(tool.inputSchema as JsonSchema);
+  const fullSchema = jsonSchemaToZod(tool.inputSchema as JsonSchema);
+  const injectedKeys = injectedParams ? Object.keys(injectedParams) : [];
+  const parameters = injectedKeys.length > 0
+    ? stripInjectedKeys(fullSchema, injectedKeys)
+    : fullSchema;
 
   return {
     name: qualifiedName,
@@ -212,6 +237,10 @@ export function adaptMCPTool(
           data: null,
           error: err instanceof Error ? err.message : String(err),
         };
+      }
+      // Merge injected params into the validated args before calling the tool
+      if (injectedParams) {
+        validated = { ...validated, ...injectedParams };
       }
       let lastError: Error | undefined;
 

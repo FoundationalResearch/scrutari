@@ -345,8 +345,29 @@ export function ChatApp({
       case 'tools':
         setShowToolBrowser(true);
         break;
+      case 'mcp': {
+        const configuredServers = config.mcp.servers;
+        if (configuredServers.length === 0 && (!mcpClient || mcpClient.size === 0)) {
+          addSystemMessage('No MCP servers configured. Use "scrutari mcp add" to add one.');
+        } else {
+          const infos = mcpClient?.getServerInfos() ?? [];
+          const connectedNames = new Set(infos.map(i => i.name));
+          const lines: string[] = [];
+          for (const info of infos) {
+            lines.push(`  ${info.name} (${info.transport}) — ${info.tools.length} tools — connected`);
+          }
+          for (const server of configuredServers) {
+            if (!connectedNames.has(server.name)) {
+              const transport = server.command ? 'stdio' : 'http';
+              lines.push(`  ${server.name} (${transport}) — disconnected`);
+            }
+          }
+          addSystemMessage(`MCP Servers (${infos.length}/${configuredServers.length} connected):\n${lines.join('\n')}`);
+        }
+        break;
+      }
       case 'help':
-        addSystemMessage('Available commands: /plan — toggle plan mode, /proceed — exit plan mode and execute the plan, /dry-run — toggle dry-run mode, /read-only — toggle read-only mode, /compact [instructions] — compact context window, /skills — browse skills, /tools — show tools and MCP servers, /activate <name> — activate an agent skill, /persona [name|off] — switch persona, /instruct <text> — set session instructions, /context — show active context, /help — show this help. You can also type /<skill-name> [args] to run a skill directly.\n\nTips: Type / to see all commands with autocomplete. Use TAB to complete, arrows to navigate. Press ESC to exit plan/dry-run/read-only mode.');
+        addSystemMessage('Available commands: /plan — toggle plan mode, /proceed — exit plan mode and execute the plan, /dry-run — toggle dry-run mode, /read-only — toggle read-only mode, /compact [instructions] — compact context window, /skills — browse skills, /tools — show tools and MCP servers, /mcp — show MCP server status, /activate <name> — activate an agent skill, /persona [name|off] — switch persona, /instruct <text> — set session instructions, /context — show active context, /help — show this help. You can also type /<skill-name> [args] to run a skill directly.\n\nTips: Type / to see all commands with autocomplete. Use TAB to complete, arrows to navigate. Press ESC to exit plan/dry-run/read-only mode.');
         break;
       default: {
         // Try matching as a skill command (e.g., /deepdive NVDA --depth full)
@@ -424,6 +445,8 @@ export function ChatApp({
       tools: [
         { name: 'news_search', description: 'Search for recent news articles' },
       ],
+      envVar: 'BRAVE_API_KEY',
+      setupHint: 'export BRAVE_API_KEY=<your-api-key> (https://api.search.brave.com)',
     },
   ], []);
 

@@ -326,4 +326,115 @@ describe('adaptMCPTool', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('Connection lost');
   });
+
+  describe('injectedParams', () => {
+    it('strips injected keys from the schema', () => {
+      const tool = adaptMCPTool(
+        'market',
+        {
+          name: 'get_bars',
+          description: 'Get bars',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              api_key: { type: 'string' },
+              ticker: { type: 'string' },
+            },
+            required: ['api_key', 'ticker'],
+          },
+        },
+        mockCallTool,
+        { api_key: 'secret-key' },
+      );
+
+      const schema = tool.parameters as z.ZodObject<z.ZodRawShape>;
+      const keys = Object.keys(schema.shape);
+      expect(keys).toContain('ticker');
+      expect(keys).not.toContain('api_key');
+    });
+
+    it('injects params into the tool call args', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        success: true,
+        content: [{ type: 'text', text: '{"price": 100}' }],
+        isError: false,
+      });
+
+      const tool = adaptMCPTool(
+        'market',
+        {
+          name: 'get_bars',
+          description: 'Get bars',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              api_key: { type: 'string' },
+              ticker: { type: 'string' },
+            },
+            required: ['api_key', 'ticker'],
+          },
+        },
+        mockCallTool,
+        { api_key: 'secret-key' },
+      );
+
+      // Call without api_key — it should be injected
+      await tool.execute({ ticker: 'AAPL' }, {});
+
+      expect(mockCallTool).toHaveBeenCalledWith('get_bars', {
+        ticker: 'AAPL',
+        api_key: 'secret-key',
+      });
+    });
+
+    it('does not require injected keys during validation', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        success: true,
+        content: [{ type: 'text', text: '{}' }],
+        isError: false,
+      });
+
+      const tool = adaptMCPTool(
+        'market',
+        {
+          name: 'get_status',
+          description: 'Get status',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              api_key: { type: 'string' },
+            },
+            required: ['api_key'],
+          },
+        },
+        mockCallTool,
+        { api_key: 'my-key' },
+      );
+
+      // Call with empty params — should succeed because api_key is stripped from schema
+      const result = await tool.execute({}, {});
+      expect(result.success).toBe(true);
+    });
+
+    it('works with no injectedParams (backward compat)', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        success: true,
+        content: [{ type: 'text', text: '"ok"' }],
+        isError: false,
+      });
+
+      const tool = adaptMCPTool(
+        'server',
+        {
+          name: 'ping',
+          description: 'Ping',
+          inputSchema: { type: 'object' },
+        },
+        mockCallTool,
+      );
+
+      const result = await tool.execute({}, {});
+      expect(result.success).toBe(true);
+    });
+  });
 });

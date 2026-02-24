@@ -1,8 +1,8 @@
 import type { ToolContext } from '../types.js';
 import { fetchWithRetry } from '../retry.js';
 
-const YAHOO_QUOTE_URL = 'https://query1.finance.yahoo.com/v8/finance/chart';
-const YAHOO_QUOTE_SUMMARY = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary';
+const RAPIDAPI_HOST = 'apidojo-yahoo-finance-v1.p.rapidapi.com';
+const RAPIDAPI_BASE = `https://${RAPIDAPI_HOST}`;
 
 // Simple in-memory cache with 5-minute TTL for fresh data,
 // but stale entries are kept for fallback on API failures.
@@ -34,15 +34,32 @@ export function clearCache(): void {
   cache.clear();
 }
 
-async function fetchYahoo(
-  url: string,
+function getApiKey(context: ToolContext): string {
+  const apiKey = context.config.marketDataApiKey;
+  if (!apiKey) {
+    throw new Error(
+      'Market data API key not configured. Set tools.market_data.api_key in ~/.scrutari/config.yaml ' +
+      'with a RapidAPI key from https://rapidapi.com/apidojo/api/yahoo-finance1, ' +
+      'or set the RAPIDAPI_KEY environment variable.',
+    );
+  }
+  return apiKey;
+}
+
+async function fetchRapidAPI(
+  path: string,
+  params: Record<string, string>,
   context: ToolContext,
 ): Promise<unknown> {
+  const apiKey = getApiKey(context);
+  const url = `${RAPIDAPI_BASE}${path}?${new URLSearchParams(params).toString()}`;
+
   const response = await fetchWithRetry(
     url,
     {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; scrutari-cli/0.1)',
+        'X-RapidAPI-Key': apiKey,
+        'X-RapidAPI-Host': RAPIDAPI_HOST,
       },
       signal: context.abortSignal,
     },
@@ -53,16 +70,17 @@ async function fetchYahoo(
 }
 
 /**
- * Fetch Yahoo with cache fallback: if the API call fails after retries,
+ * Fetch RapidAPI with cache fallback: if the API call fails after retries,
  * return stale cached data if available.
  */
-async function fetchYahooWithFallback<T>(
-  url: string,
+async function fetchRapidAPIWithFallback<T>(
+  path: string,
+  params: Record<string, string>,
   cacheKey: string,
   context: ToolContext,
 ): Promise<{ data: T; stale: boolean }> {
   try {
-    const data = await fetchYahoo(url, context) as T;
+    const data = await fetchRapidAPI(path, params, context) as T;
     return { data, stale: false };
   } catch (err) {
     const stale = getStaleCached<T>(cacheKey);
@@ -96,54 +114,50 @@ export async function getQuote(
   const cached = getCached<QuoteData>(cacheKey);
   if (cached) return cached;
 
-  const url = `${YAHOO_QUOTE_URL}/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
-
-  type ChartResponse = {
-    chart?: {
+  type QuotesResponse = {
+    quoteResponse?: {
       result?: Array<{
-        meta?: {
-          regularMarketPrice?: number;
-          previousClose?: number;
-          currency?: string;
-          exchangeName?: string;
-          shortName?: string;
-          fiftyTwoWeekHigh?: number;
-          fiftyTwoWeekLow?: number;
-          regularMarketVolume?: number;
-          marketCap?: number;
-          chartPreviousClose?: number;
-        };
+        regularMarketPrice?: number;
+        regularMarketPreviousClose?: number;
+        regularMarketChange?: number;
+        regularMarketChangePercent?: number;
+        regularMarketVolume?: number;
+        marketCap?: number;
+        fiftyTwoWeekHigh?: number;
+        fiftyTwoWeekLow?: number;
+        currency?: string;
+        fullExchangeName?: string;
+        shortName?: string;
       }>;
     };
   };
 
-  const { data } = await fetchYahooWithFallback<ChartResponse>(url, cacheKey, context);
+  const { data } = await fetchRapidAPIWithFallback<QuotesResponse>(
+    '/market/get-quotes',
+    { symbols: ticker, region: 'US' },
+    cacheKey,
+    context,
+  );
 
-  const result = data.chart?.result?.[0];
-  const meta = result?.meta;
+  const result = data.quoteResponse?.result?.[0];
 
-  if (!meta) {
+  if (!result) {
     throw new Error(`No quote data found for ${ticker}`);
   }
 
-  const price = meta.regularMarketPrice ?? null;
-  const previousClose = meta.chartPreviousClose ?? meta.previousClose ?? null;
-
   const quote: QuoteData = {
     ticker,
-    price,
-    previousClose,
-    change: price != null && previousClose != null ? price - previousClose : null,
-    changePercent: price != null && previousClose != null && previousClose !== 0
-      ? ((price - previousClose) / previousClose) * 100
-      : null,
-    volume: meta.regularMarketVolume ?? null,
-    marketCap: meta.marketCap ?? null,
-    fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh ?? null,
-    fiftyTwoWeekLow: meta.fiftyTwoWeekLow ?? null,
-    currency: meta.currency ?? 'USD',
-    exchange: meta.exchangeName ?? '',
-    name: meta.shortName ?? ticker,
+    price: result.regularMarketPrice ?? null,
+    previousClose: result.regularMarketPreviousClose ?? null,
+    change: result.regularMarketChange ?? null,
+    changePercent: result.regularMarketChangePercent ?? null,
+    volume: result.regularMarketVolume ?? null,
+    marketCap: result.marketCap ?? null,
+    fiftyTwoWeekHigh: result.fiftyTwoWeekHigh ?? null,
+    fiftyTwoWeekLow: result.fiftyTwoWeekLow ?? null,
+    currency: result.currency ?? 'USD',
+    exchange: result.fullExchangeName ?? '',
+    name: result.shortName ?? ticker,
   };
 
   setCache(cacheKey, quote);
@@ -185,9 +199,8 @@ export async function getHistory(
   if (cached) return cached;
 
   const range = PERIOD_MAP[period] ?? period;
-  const url = `${YAHOO_QUOTE_URL}/${encodeURIComponent(ticker)}?interval=1d&range=${range}`;
 
-  type ChartHistoryResponse = {
+  type ChartResponse = {
     chart?: {
       result?: Array<{
         timestamp?: number[];
@@ -204,19 +217,24 @@ export async function getHistory(
     };
   };
 
-  const { data } = await fetchYahooWithFallback<ChartHistoryResponse>(url, cacheKey, context);
+  const { data } = await fetchRapidAPIWithFallback<ChartResponse>(
+    '/stock/v2/get-chart',
+    { symbol: ticker, interval: '1d', range, region: 'US' },
+    cacheKey,
+    context,
+  );
 
-  const result = data.chart?.result?.[0];
-  const timestamps = result?.timestamp ?? [];
-  const quote = result?.indicators?.quote?.[0] ?? {};
+  const chartResult = data.chart?.result?.[0];
+  const timestamps = chartResult?.timestamp ?? [];
+  const quoteData = chartResult?.indicators?.quote?.[0] ?? {};
 
   const prices: HistoricalPrice[] = timestamps.map((ts, i) => ({
     date: new Date(ts * 1000).toISOString().split('T')[0],
-    open: quote.open?.[i] ?? null,
-    high: quote.high?.[i] ?? null,
-    low: quote.low?.[i] ?? null,
-    close: quote.close?.[i] ?? null,
-    volume: quote.volume?.[i] ?? null,
+    open: quoteData.open?.[i] ?? null,
+    high: quoteData.high?.[i] ?? null,
+    low: quoteData.low?.[i] ?? null,
+    close: quoteData.close?.[i] ?? null,
+    volume: quoteData.volume?.[i] ?? null,
   }));
 
   const history: HistoryData = { ticker, period, prices };
@@ -239,10 +257,7 @@ export async function getMarketFinancials(
   const cached = getCached<FinancialStatement>(cacheKey);
   if (cached) return cached;
 
-  const modules = 'incomeStatementHistory,balanceSheetHistory,cashflowStatementHistory';
-  const url = `${YAHOO_QUOTE_SUMMARY}/${encodeURIComponent(ticker)}?modules=${modules}`;
-
-  type SummaryResponse = {
+  type FinancialsResponse = {
     quoteSummary?: {
       result?: Array<{
         incomeStatementHistory?: unknown;
@@ -252,7 +267,12 @@ export async function getMarketFinancials(
     };
   };
 
-  const { data } = await fetchYahooWithFallback<SummaryResponse>(url, cacheKey, context);
+  const { data } = await fetchRapidAPIWithFallback<FinancialsResponse>(
+    '/stock/v2/get-financials',
+    { symbol: ticker, region: 'US' },
+    cacheKey,
+    context,
+  );
 
   const result = data.quoteSummary?.result?.[0];
   const financials: FinancialStatement = {

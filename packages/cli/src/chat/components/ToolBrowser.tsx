@@ -5,6 +5,10 @@ import type { MCPServerInfo } from '@scrutari/mcp';
 interface BuiltInToolGroup {
   group: string;
   tools: Array<{ name: string; description: string }>;
+  /** Env var required for this tool group (e.g., 'BRAVE_API_KEY'). If set and missing, shows as not-configured. */
+  envVar?: string;
+  /** Setup hint shown when not configured (e.g., 'export BRAVE_API_KEY=<your-api-key>') */
+  setupHint?: string;
 }
 
 interface BuiltInMcpServer {
@@ -56,11 +60,13 @@ export function ToolBrowser({
 
   // Built-in tool groups
   for (const group of builtInGroups) {
+    const needsKey = group.envVar && !process.env[group.envVar];
     sections.push({
       type: 'builtin',
       label: group.group,
-      status: 'available',
-      tools: group.tools,
+      status: needsKey ? 'not-configured' : 'available',
+      tools: needsKey ? [] : group.tools,
+      setupHint: needsKey ? (group.setupHint ?? `export ${group.envVar}=<your-api-key>`) : undefined,
     });
   }
 
@@ -167,7 +173,9 @@ export function ToolBrowser({
     );
   }
 
-  const builtInToolCount = builtInGroups.reduce((sum, g) => sum + g.tools.length, 0);
+  const builtInToolCount = builtInGroups
+    .filter(g => !g.envVar || process.env[g.envVar])
+    .reduce((sum, g) => sum + g.tools.length, 0);
   const mcpToolCount = mcpServers.reduce((sum, s) => sum + s.tools.length, 0);
   const connectedMcpCount = mcpServers.length;
   const totalMcpConfigured = new Set([
@@ -196,8 +204,14 @@ export function ToolBrowser({
                   {isSelected ? '\u25b8' : ' '}
                   {section.label}
                 </Text>
-                {section.type === 'builtin' && (
+                {section.type === 'builtin' && section.status === 'available' && (
                   <Text dimColor>({section.tools.length} tools)</Text>
+                )}
+                {section.type === 'builtin' && section.status === 'not-configured' && (
+                  <>
+                    <Text color="yellow">{'\u25cb'} not configured</Text>
+                    {section.setupHint && <Text dimColor>({section.setupHint})</Text>}
+                  </>
                 )}
                 {(section.type === 'mcp' || section.type === 'builtin-mcp') && section.status === 'connected' && (
                   <Text color="green">

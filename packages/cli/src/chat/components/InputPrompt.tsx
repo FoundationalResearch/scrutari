@@ -69,6 +69,17 @@ export function InputPrompt({
   };
 
   const handleSubmit = (text: string) => {
+    // If autocomplete menu is showing, submit the selected command instead of raw text
+    if (showMenu && suggestions[selectedIndex]) {
+      const selected = suggestions[selectedIndex];
+      const completed = '/' + selected.name;
+      onSubmit(completed);
+      setValue('');
+      setSelectedIndex(0);
+      setMenuDismissed(false);
+      return;
+    }
+
     const trimmed = text.trim();
     if (!trimmed) return;
     onSubmit(trimmed);

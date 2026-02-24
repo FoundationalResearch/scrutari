@@ -102,7 +102,7 @@ export class MCPClientManager {
         allTools.push(
           adaptMCPTool(serverName, tool, (toolName, args) =>
             this.executeToolRaw(serverName, toolName, args),
-          ),
+          server.config.injectedParams),
         );
       }
     }

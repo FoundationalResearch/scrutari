@@ -12,6 +12,8 @@ export interface ToolConfig {
   userAgent?: string;
   /** News API key */
   newsApiKey?: string;
+  /** RapidAPI key for Yahoo Finance market data */
+  marketDataApiKey?: string;
   /** Generic tool-level config overrides */
   [key: string]: unknown;
 }

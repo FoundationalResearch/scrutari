@@ -1,6 +1,6 @@
-import { readFileSync, existsSync, writeFileSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
 import { parse, stringify } from 'yaml';
 import { ConfigSchema, ConfigDefaults, type RawConfig, type Config, type ProviderId } from './schema.js';
 
@@ -135,6 +135,54 @@ function applyEnvVarFallbacks(config: Config): void {
       config.providers.minimax.api_key = envKey;
     }
   }
+
+  // Clear unresolved env var references for tool API keys
+  if (isUnresolvedEnvRef(config.tools.market_data.api_key)) {
+    config.tools.market_data.api_key = undefined;
+  }
+
+  // Apply env var fallback for RapidAPI key (market data)
+  if (!config.tools.market_data.api_key) {
+    const envKey = process.env['RAPIDAPI_KEY'];
+    if (envKey) {
+      config.tools.market_data.api_key = envKey;
+    }
+  }
+
+  // Clear unresolved env var references for MarketOnePager
+  if (isUnresolvedEnvRef(config.tools.marketonepager.api_key)) {
+    config.tools.marketonepager.api_key = undefined;
+  }
+  if (isUnresolvedEnvRef(config.tools.marketonepager.url)) {
+    config.tools.marketonepager.url = undefined;
+  }
+
+  // Apply env var fallback for MarketOnePager
+  if (!config.tools.marketonepager.api_key) {
+    const envKey = process.env['MARKETONEPAGER_KEY'];
+    if (envKey) {
+      config.tools.marketonepager.api_key = envKey;
+    }
+  }
+  if (!config.tools.marketonepager.url) {
+    const envUrl = process.env['MARKETONEPAGER_URL'];
+    if (envUrl) {
+      config.tools.marketonepager.url = envUrl;
+    }
+  }
+
+  // Clear unresolved env var references for news API
+  if (isUnresolvedEnvRef(config.tools.news.api_key)) {
+    config.tools.news.api_key = undefined;
+  }
+
+  // Apply env var fallback for Brave Search (news)
+  if (!config.tools.news.api_key) {
+    const envKey = process.env['BRAVE_API_KEY'];
+    if (envKey) {
+      config.tools.news.api_key = envKey;
+    }
+  }
 }
 
 export interface LoadConfigResult {
@@ -216,6 +264,13 @@ export function loadConfigWithMeta(options: LoadConfigOptions = {}): LoadConfigR
       if (validated.data.permissions) {
         result.permissions = { ...result.permissions, ...validated.data.permissions };
       }
+      if (validated.data.tools) {
+        result.tools = {
+          market_data: { ...result.tools.market_data, ...validated.data.tools.market_data },
+          marketonepager: { ...result.tools.marketonepager, ...validated.data.tools.marketonepager },
+          news: { ...result.tools.news, ...validated.data.tools.news },
+        };
+      }
     }
   }
 
@@ -236,6 +291,15 @@ export function loadConfigWithMeta(options: LoadConfigOptions = {}): LoadConfigR
   }
   if (!result.providers.minimax.api_key && process.env['MINIMAX_API_KEY']) {
     envKeysUsed.push('MINIMAX_API_KEY');
+  }
+  if (!result.tools.market_data.api_key && process.env['RAPIDAPI_KEY']) {
+    envKeysUsed.push('RAPIDAPI_KEY');
+  }
+  if (!result.tools.marketonepager.api_key && process.env['MARKETONEPAGER_KEY']) {
+    envKeysUsed.push('MARKETONEPAGER_KEY');
+  }
+  if (!result.tools.news.api_key && process.env['BRAVE_API_KEY']) {
+    envKeysUsed.push('BRAVE_API_KEY');
   }
 
   applyEnvVarFallbacks(result);
@@ -314,4 +378,142 @@ export function setConfigValue(key: string, value: string, options: LoadConfigOp
   }
 
   writeFileSync(configPath, stringify(doc), 'utf-8');
+}
+
+export interface McpServerEntry {
+  name: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  headers?: Record<string, string>;
+  env?: Record<string, string>;
+}
+
+/**
+ * Read the raw YAML config and return the mcp.servers array.
+ * Preserves env var references (not resolved) for display purposes.
+ */
+function readRawMcpServers(configPath: string): { doc: Record<string, unknown>; servers: Array<Record<string, unknown>> } {
+  if (!existsSync(configPath)) {
+    return { doc: {}, servers: [] };
+  }
+
+  let fileContent: string;
+  try {
+    fileContent = readFileSync(configPath, 'utf-8');
+  } catch {
+    throw new ConfigError(`Failed to read config file: ${configPath}`);
+  }
+
+  let doc: Record<string, unknown>;
+  try {
+    doc = (parse(fileContent) as Record<string, unknown>) ?? {};
+  } catch {
+    throw new ConfigError(`Failed to parse config file: ${configPath}`);
+  }
+
+  const mcpSection = doc.mcp as Record<string, unknown> | undefined;
+  const servers = (mcpSection?.servers ?? []) as Array<Record<string, unknown>>;
+  return { doc, servers };
+}
+
+/**
+ * Add an MCP server to the config file.
+ * Creates the config file and directories if they don't exist.
+ * Rejects duplicate server names.
+ */
+export function addMcpServer(server: McpServerEntry, options: LoadConfigOptions = {}): void {
+  const configPath = getConfigPath(options.configPath);
+
+  // Create config file + directories if they don't exist
+  if (!existsSync(configPath)) {
+    const dir = dirname(configPath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    writeFileSync(configPath, '', 'utf-8');
+  }
+
+  const { doc, servers } = readRawMcpServers(configPath);
+
+  // Check for duplicates
+  const existing = servers.find(s => s.name === server.name);
+  if (existing) {
+    throw new ConfigError(
+      `MCP server "${server.name}" already exists. Use "scrutari mcp remove ${server.name}" first, then add again.`
+    );
+  }
+
+  // Build the entry (only include defined fields)
+  const entry: Record<string, unknown> = { name: server.name };
+  if (server.command) entry.command = server.command;
+  if (server.args && server.args.length > 0) entry.args = server.args;
+  if (server.url) entry.url = server.url;
+  if (server.headers && Object.keys(server.headers).length > 0) entry.headers = server.headers;
+  if (server.env && Object.keys(server.env).length > 0) entry.env = server.env;
+
+  // Ensure mcp.servers exists in the doc
+  if (!doc.mcp || typeof doc.mcp !== 'object') {
+    doc.mcp = { servers: [] };
+  }
+  const mcpSection = doc.mcp as Record<string, unknown>;
+  if (!Array.isArray(mcpSection.servers)) {
+    mcpSection.servers = [];
+  }
+  (mcpSection.servers as Array<Record<string, unknown>>).push(entry);
+
+  // Validate
+  const validated = ConfigSchema.safeParse(stripNullValues(doc));
+  if (!validated.success) {
+    const issues = validated.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
+    throw new ConfigError(`Invalid config after adding MCP server: ${issues}`);
+  }
+
+  writeFileSync(configPath, stringify(doc), 'utf-8');
+}
+
+/**
+ * Remove an MCP server from the config file by name.
+ * Returns true if a server was found and removed, false otherwise.
+ */
+export function removeMcpServer(name: string, options: LoadConfigOptions = {}): boolean {
+  const configPath = getConfigPath(options.configPath);
+
+  if (!existsSync(configPath)) {
+    throw new ConfigError(`Config file not found: ${configPath}`);
+  }
+
+  const { doc, servers } = readRawMcpServers(configPath);
+
+  const index = servers.findIndex(s => s.name === name);
+  if (index === -1) {
+    return false;
+  }
+
+  servers.splice(index, 1);
+
+  // Update the doc
+  const mcpSection = doc.mcp as Record<string, unknown>;
+  mcpSection.servers = servers;
+
+  writeFileSync(configPath, stringify(doc), 'utf-8');
+  return true;
+}
+
+/**
+ * Get all configured MCP servers from the raw config.
+ * Preserves env var references for display.
+ */
+export function getMcpServers(options: LoadConfigOptions = {}): McpServerEntry[] {
+  const configPath = getConfigPath(options.configPath);
+  const { servers } = readRawMcpServers(configPath);
+  return servers as unknown as McpServerEntry[];
+}
+
+/**
+ * Get a single MCP server by name from the raw config.
+ */
+export function getMcpServer(name: string, options: LoadConfigOptions = {}): McpServerEntry | undefined {
+  const servers = getMcpServers(options);
+  return servers.find(s => s.name === name);
 }

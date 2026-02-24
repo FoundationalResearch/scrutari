@@ -7,6 +7,7 @@ import { CostTracker } from './cost.js';
 vi.mock('ai', () => ({
   generateText: vi.fn(),
   streamText: vi.fn(),
+  stepCountIs: vi.fn().mockImplementation((n: number) => () => false),
 }));
 
 import { generateText, streamText } from 'ai';
@@ -140,6 +141,71 @@ describe('callLLM', () => {
         budget: { maxCostUsd: 5.0, tracker },
       })),
     ).rejects.toThrow(BudgetExceededRetryError);
+  });
+
+  it('passes stopWhen to generateText when maxToolSteps is provided', async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'Analysis with tool data',
+      toolCalls: [],
+      usage: {
+        inputTokens: 100,
+        outputTokens: 200,
+        totalTokens: 300,
+        inputTokenDetails: { noCacheTokens: undefined, cacheReadTokens: undefined, cacheWriteTokens: undefined },
+        outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+      },
+      totalUsage: {
+        inputTokens: 250,
+        outputTokens: 400,
+        totalTokens: 650,
+        inputTokenDetails: { noCacheTokens: undefined, cacheReadTokens: undefined, cacheWriteTokens: undefined },
+        outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+      },
+    } as any);
+
+    const mockTools = {
+      get_quote: {
+        description: 'Get stock quote',
+        parameters: {},
+        execute: vi.fn(),
+      },
+    };
+
+    const result = await callLLM(makeBaseOptions({
+      tools: mockTools as any,
+      maxToolSteps: 5,
+    }));
+
+    // Verify stopWhen was passed to generateText
+    expect(mockGenerateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stopWhen: expect.any(Function),
+      }),
+    );
+
+    // Should use totalUsage (aggregated across all steps)
+    expect(result.usage.inputTokens).toBe(250);
+    expect(result.usage.outputTokens).toBe(400);
+  });
+
+  it('does not pass stopWhen when maxToolSteps is not provided', async () => {
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'result',
+      toolCalls: [],
+      usage: {
+        inputTokens: 100,
+        outputTokens: 200,
+        totalTokens: 300,
+        inputTokenDetails: { noCacheTokens: undefined, cacheReadTokens: undefined, cacheWriteTokens: undefined },
+        outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
+      },
+    } as any);
+
+    await callLLM(makeBaseOptions());
+
+    // Verify stopWhen was NOT passed
+    const callArgs = mockGenerateText.mock.calls[0][0];
+    expect(callArgs).not.toHaveProperty('stopWhen');
   });
 
   it('handles undefined token counts gracefully', async () => {

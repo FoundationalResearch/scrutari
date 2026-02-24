@@ -48,6 +48,7 @@ function makeConfig(overrides?: Partial<Config>): Config {
       model: 'claude-haiku-3-5-20241022',
     },
     permissions: {},
+    tools: { market_data: {}, marketonepager: {}, news: {} },
     ...overrides,
   } as Config;
 }

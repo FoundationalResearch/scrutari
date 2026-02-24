@@ -74,7 +74,7 @@ export async function runTaskAgent(ctx: TaskAgentContext): Promise<TaskAgentOutc
 
     const prompt = substituteVariables(stage.prompt ?? '', variables);
 
-    let systemPrompt = 'You are an expert financial analyst. Complete the following analysis task.';
+    let systemPrompt = 'You are an expert financial analyst. Complete the following analysis task. IMPORTANT: Always use the provided tools to fetch real-time data. Do not generate financial data, prices, or metrics from memory.';
     if (stage.output_format) {
       systemPrompt += ` Respond in ${stage.output_format} format.`;
     }
@@ -190,61 +190,30 @@ async function executeWithTools(
   temperature: number | undefined,
   maxToolSteps: number,
 ): Promise<{ content: string; inputTokens: number; outputTokens: number }> {
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
-  const conversationMessages = [...messages] as Array<{ role: string; content: string }>;
-  let finalContent = '';
+  // Use AI SDK's built-in multi-step agent loop via stopWhen/stepCountIs.
+  // This ensures tool results are automatically fed back to the LLM
+  // so it can generate a response based on real data.
+  const response = await callLLM({
+    model,
+    modelId,
+    system: systemPrompt,
+    messages,
+    tools,
+    maxOutputTokens: maxTokens,
+    temperature,
+    budget,
+    abortSignal,
+    maxToolSteps,
+  });
 
-  for (let step = 0; step < maxToolSteps; step++) {
-    const response = await callLLM({
-      model,
-      modelId,
-      system: systemPrompt,
-      messages: conversationMessages as Array<{ role: 'user' | 'assistant'; content: string }>,
-      tools,
-      maxOutputTokens: maxTokens,
-      temperature,
-      budget,
-      abortSignal,
-    });
-
-    totalInputTokens += response.usage.inputTokens;
-    totalOutputTokens += response.usage.outputTokens;
-
-    // If no tool calls, we have the final text response
-    if (!response.toolCalls || response.toolCalls.length === 0) {
-      finalContent = response.content;
-      emit('stage:stream', { stageName: stage.name, chunk: response.content });
-      break;
-    }
-
-    // With AI SDK's tools that have execute(), tool calls are auto-executed
-    finalContent = response.content;
-    if (finalContent) {
-      emit('stage:stream', { stageName: stage.name, chunk: finalContent });
-      break;
-    }
-
-    // No content yet after tool calls — add results to conversation for next round
-    const toolResultSummary = response.toolCalls
-      .map(tc => `[Tool ${tc.toolName}: called with ${JSON.stringify(tc.input)}]`)
-      .join('\n');
-    conversationMessages.push({ role: 'assistant', content: toolResultSummary });
-    conversationMessages.push({
-      role: 'user',
-      content: 'Continue with the analysis based on the tool results above.',
-    });
-
-    emit('stage:stream', {
-      stageName: stage.name,
-      chunk: `\n[Using tools: ${response.toolCalls.map(tc => tc.toolName).join(', ')}]\n`,
-    });
+  if (response.content) {
+    emit('stage:stream', { stageName: stage.name, chunk: response.content });
   }
 
   return {
-    content: finalContent,
-    inputTokens: totalInputTokens,
-    outputTokens: totalOutputTokens,
+    content: response.content,
+    inputTokens: response.usage.inputTokens,
+    outputTokens: response.usage.outputTokens,
   };
 }
 

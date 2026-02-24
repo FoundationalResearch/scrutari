@@ -37,6 +37,10 @@ export OPENAI_API_KEY=sk-...
 export GEMINI_API_KEY=...
 # or
 export MINIMAX_API_KEY=...
+
+# Optional: enable market data tools (stock quotes, historical prices, financials)
+export RAPIDAPI_KEY=...   # from https://rapidapi.com/apidojo/api/yahoo-finance1
+
 npx @foundationalresearch/scrutari
 ```
 
@@ -52,7 +56,7 @@ That's it. No config file needed. Scrutari auto-detects `ANTHROPIC_API_KEY`, `OP
 ### Example session
 
 ```
-╭─ scrutari v0.3.0 ─────────────────────────────────────────────╮
+╭─ scrutari v0.3.1 ─────────────────────────────────────────────╮
 │                                                                │
 │  Welcome, user!            │ Tips for getting started          │
 │                            │ "analyze NVDA" run a deep ...     │
@@ -117,6 +121,7 @@ Sessions are stored as JSON files in `~/.scrutari/sessions/`.
 ```
 scrutari [options]
 scrutari skill <subcommand> [args]
+scrutari mcp <subcommand> [args]
 
 Options:
   --continue          Resume the most recent session
@@ -134,6 +139,11 @@ Subcommands:
   skill create        Interactive skill creation wizard
   skill validate      Validate a skill YAML file or agent skill directory
   skill install       Install a skill from a URL or GitHub shorthand
+  mcp add             Add an MCP server (stdio or HTTP)
+  mcp add-json        Add an MCP server from a JSON blob
+  mcp list            List configured MCP servers
+  mcp get             Show details for a specific server
+  mcp remove          Remove an MCP server
 ```
 
 | Key | Action |
@@ -144,7 +154,7 @@ Subcommands:
 
 ## Configuration
 
-When `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` is set in your environment, Scrutari works immediately with sensible defaults (Anthropic, Sonnet 4, $5.00 budget). For full control, create `~/.scrutari/config.yaml`.
+When `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` is set in your environment, Scrutari works immediately with sensible defaults (Anthropic, Sonnet 4, $5.00 budget). Market data tools (stock quotes, historical prices, financials) require a `RAPIDAPI_KEY` from [RapidAPI Yahoo Finance](https://rapidapi.com/apidojo/api/yahoo-finance1). For full control, create `~/.scrutari/config.yaml`.
 
 Scrutari also supports context engineering: persistent instructions (`~/.scrutari/SCRUTARI.md`, `./SCRUTARI.local.md`), user preferences (`~/.scrutari/preferences.yaml`), analysis rules (`~/.scrutari/rules/`), financial personas (`~/.scrutari/personas/`), and auto-tracked user memory (`~/.scrutari/memory.json`). Use `/activate`, `/persona`, `/instruct`, `/compact`, and `/context` commands in chat.
 

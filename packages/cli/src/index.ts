@@ -16,7 +16,7 @@ import { listSessions } from './chat/session/storage.js';
 import { scanSkillFiles, scanSkillSummaries, scanAgentSkillSummaries, HookManager } from '@scrutari/core';
 import { MCPClientManager } from '@scrutari/mcp';
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 
 function getBuiltInSkillsDir(): string {
   const thisFile = fileURLToPath(import.meta.url);
@@ -44,6 +44,7 @@ ${chalk.blue.bold('scrutari')} — Interactive financial analysis chat
 ${chalk.bold('Usage:')}
   scrutari [options]
   scrutari skill <subcommand> [args]
+  scrutari mcp <subcommand> [args]
 
 ${chalk.bold('Options:')}
   --continue       Resume the most recent session
@@ -61,12 +62,19 @@ ${chalk.bold('Subcommands:')}
   skill create     Interactive skill creation wizard
   skill validate   Validate a skill YAML file or agent skill directory
   skill install    Install a skill from a URL or GitHub shorthand
+  mcp add          Add an MCP server (stdio or HTTP)
+  mcp add-json     Add an MCP server from a JSON blob
+  mcp list         List configured MCP servers
+  mcp get          Show details for a specific server
+  mcp remove       Remove an MCP server
 
 ${chalk.bold('Chat Commands:')}
   /plan            Toggle plan mode (preview execution without running)
   /dry-run         Toggle dry-run mode (estimate costs only)
   /read-only       Toggle read-only mode (only data lookups)
   /compact [text]  Compact context window (optional: instructions to preserve)
+  /tools           Show configured tools and MCP servers
+  /mcp             Show MCP server connection status
   /skills          Browse skills interactively
   /activate <name> Activate an agent skill for domain expertise
   /persona [name]  Switch persona (or show current). Use "off" to deactivate
@@ -91,6 +99,9 @@ ${chalk.bold('Examples:')}
   ${chalk.dim('$')} scrutari --verbose
   ${chalk.dim('$')} scrutari skill list
   ${chalk.dim('$')} scrutari skill install user/repo/my-skill
+  ${chalk.dim('$')} scrutari mcp add my-server -- npx -y @some/mcp-server
+  ${chalk.dim('$')} scrutari mcp add --transport http my-api http://localhost:3001/mcp
+  ${chalk.dim('$')} scrutari mcp list
 
 ${chalk.dim('Inside the chat, just type naturally:')}
   ${chalk.dim('>')} analyze NVDA
@@ -130,6 +141,13 @@ async function main(): Promise<void> {
   if (positionals.length > 0 && positionals[0] === 'skill') {
     const { handleSkillCommand } = await import('./skill/index.js');
     await handleSkillCommand(positionals[1] ?? 'list', positionals.slice(2));
+    return;
+  }
+
+  // Subcommand routing: scrutari mcp <subcommand> [args]
+  if (positionals.length > 0 && positionals[0] === 'mcp') {
+    const { handleMcpCommand } = await import('./mcp/index.js');
+    await handleMcpCommand(positionals[1] ?? 'list', positionals.slice(2), process.argv);
     return;
   }
 
@@ -194,16 +212,17 @@ async function main(): Promise<void> {
   const skillSummaries = scanSkillSummaries(builtInDir, userDir);
   const agentSkillSummaries = scanAgentSkillSummaries(builtInDir, userDir);
 
-  // Auto-configure MarketOnePager MCP server when MARKETONEPAGER_KEY is set
-  const marketonepagerKey = process.env.MARKETONEPAGER_KEY;
+  // Auto-configure MarketOnePager MCP server when api_key is available (from config or env)
+  const marketonepagerKey = config.tools.marketonepager.api_key;
   if (marketonepagerKey) {
-    const marketonepagerUrl = process.env.MARKETONEPAGER_URL ?? 'http://localhost:8001/mcp';
+    const marketonepagerUrl = config.tools.marketonepager.url ?? 'http://localhost:8001/mcp';
     const alreadyConfigured = config.mcp.servers.some(s => s.name === 'marketonepager');
     if (!alreadyConfigured) {
       config.mcp.servers.push({
         name: 'marketonepager',
         url: marketonepagerUrl,
-        headers: { Authorization: `Bearer ${marketonepagerKey}` },
+        headers: { 'X-API-Key': marketonepagerKey },
+        injectedParams: { api_key: marketonepagerKey },
       });
     }
   }

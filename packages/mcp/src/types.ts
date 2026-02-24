@@ -11,6 +11,10 @@ export interface MCPServerConfig {
   url?: string;
   /** Custom headers for HTTP transport (e.g. API key auth) */
   headers?: Record<string, string>;
+  /** Environment variables to pass to stdio server process */
+  env?: Record<string, string>;
+  /** Parameters to auto-inject into every tool call (stripped from schema so the LLM never sees them). */
+  injectedParams?: Record<string, string>;
 }
 
 /**

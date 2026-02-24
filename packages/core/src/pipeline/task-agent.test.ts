@@ -211,6 +211,26 @@ describe('runTaskAgent', () => {
     }
   });
 
+  it('passes maxToolSteps to callLLM when stage has tools', async () => {
+    const { callLLM } = vi.mocked(await import('../router/llm.js'));
+    const mockToolSet = { get_quote: { description: 'Get quote', execute: vi.fn() } };
+    const ctx = makeContext({
+      providers,
+      stage: { name: 'gather', prompt: 'Gather data for {ticker}', tools: ['market-data'] },
+      resolveTools: vi.fn().mockReturnValue(mockToolSet),
+      agentDefaults: { model: 'test', maxTokens: 4096, temperature: 0, maxToolSteps: 5 },
+    });
+    await runTaskAgent(ctx);
+
+    // Should use callLLM (not streamLLM) with maxToolSteps
+    expect(callLLM).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxToolSteps: 5,
+        tools: mockToolSet,
+      }),
+    );
+  });
+
   it('uses agentDefaults for maxTokens and temperature', async () => {
     const { streamLLM } = vi.mocked(await import('../router/llm.js'));
     const ctx = makeContext({

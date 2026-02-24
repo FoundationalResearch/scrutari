@@ -184,6 +184,111 @@ describe('ToolBrowser list view', () => {
   });
 });
 
+describe('ToolBrowser built-in tool group envVar status', () => {
+  it('shows not-configured for built-in group when envVar is missing', () => {
+    delete process.env.TEST_NEWS_KEY;
+    const groups: BuiltInToolGroup[] = [
+      {
+        group: 'news',
+        tools: [{ name: 'news_search', description: 'Search news' }],
+        envVar: 'TEST_NEWS_KEY',
+        setupHint: 'export TEST_NEWS_KEY=<your-key>',
+      },
+    ];
+    const { lastFrame } = render(
+      <ToolBrowser
+        builtInGroups={groups}
+        builtInMcpServers={[]}
+        mcpServers={[]}
+        configuredServerNames={[]}
+        onClose={vi.fn()}
+      />
+    );
+    expect(lastFrame()).toContain('news');
+    expect(lastFrame()).toContain('not configured');
+    expect(lastFrame()).toContain('TEST_NEWS_KEY');
+  });
+
+  it('shows available for built-in group when envVar is set', () => {
+    process.env.TEST_NEWS_KEY = 'some-key';
+    const groups: BuiltInToolGroup[] = [
+      {
+        group: 'news',
+        tools: [{ name: 'news_search', description: 'Search news' }],
+        envVar: 'TEST_NEWS_KEY',
+      },
+    ];
+    const { lastFrame } = render(
+      <ToolBrowser
+        builtInGroups={groups}
+        builtInMcpServers={[]}
+        mcpServers={[]}
+        configuredServerNames={[]}
+        onClose={vi.fn()}
+      />
+    );
+    expect(lastFrame()).toContain('news');
+    expect(lastFrame()).toContain('(1 tools)');
+    expect(lastFrame()).not.toContain('not configured');
+    delete process.env.TEST_NEWS_KEY;
+  });
+
+  it('excludes unconfigured tool group from built-in count', () => {
+    delete process.env.TEST_NEWS_KEY;
+    const groups: BuiltInToolGroup[] = [
+      {
+        group: 'edgar',
+        tools: [
+          { name: 'edgar_search_filings', description: 'Search SEC EDGAR' },
+          { name: 'edgar_get_filing', description: 'Get a filing' },
+        ],
+      },
+      {
+        group: 'news',
+        tools: [{ name: 'news_search', description: 'Search news' }],
+        envVar: 'TEST_NEWS_KEY',
+      },
+    ];
+    const { lastFrame } = render(
+      <ToolBrowser
+        builtInGroups={groups}
+        builtInMcpServers={[]}
+        mcpServers={[]}
+        configuredServerNames={[]}
+        onClose={vi.fn()}
+      />
+    );
+    // Only edgar's 2 tools should be counted, not news's 1
+    expect(lastFrame()).toContain('2 built-in');
+  });
+
+  it('does not open detail view for unconfigured built-in group', async () => {
+    delete process.env.TEST_NEWS_KEY;
+    const groups: BuiltInToolGroup[] = [
+      {
+        group: 'news',
+        tools: [{ name: 'news_search', description: 'Search news' }],
+        envVar: 'TEST_NEWS_KEY',
+      },
+    ];
+    const { lastFrame, stdin } = render(
+      <ToolBrowser
+        builtInGroups={groups}
+        builtInMcpServers={[]}
+        mcpServers={[]}
+        configuredServerNames={[]}
+        onClose={vi.fn()}
+      />
+    );
+    await new Promise(r => setTimeout(r, 50));
+    stdin.write('\r'); // Enter on news
+    await new Promise(r => setTimeout(r, 50));
+    // Should stay on list view since no tools (unconfigured)
+    expect(lastFrame()).toContain('Navigate');
+    expect(lastFrame()).not.toContain('Endpoints');
+  });
+});
+
 describe('ToolBrowser detail view', () => {
   it('shows detail view on Enter for built-in group', async () => {
     const { lastFrame, stdin } = render(

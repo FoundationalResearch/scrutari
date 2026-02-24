@@ -93,6 +93,13 @@ export function MessageBubble({ message, isStreaming, verbose }: MessageBubblePr
 
   return (
     <Box flexDirection="column" marginY={0}>
+      {unlinkedSegments.length > 0 && (
+        <Box flexDirection="column" marginBottom={0}>
+          {unlinkedSegments.map((seg, i) => (
+            <InlineThinking key={`unlinked-${i}`} segment={seg} verbose={verbose} isStreaming={isStreaming} />
+          ))}
+        </Box>
+      )}
       {message.toolCalls && message.toolCalls.length > 0 && (
         <Box flexDirection="column" marginBottom={0}>
           {message.toolCalls.map(tc => {

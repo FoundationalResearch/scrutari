@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { loadConfig, loadConfigWithMeta, setConfigValue, ConfigError } from './loader.js';
-import { writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
+import { loadConfig, loadConfigWithMeta, setConfigValue, addMcpServer, removeMcpServer, getMcpServers, getMcpServer, ConfigError } from './loader.js';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { homedir } from 'os';
 
@@ -255,6 +255,26 @@ mcp:
     const envApi = config.mcp.servers.find(s => s.name === 'env-api');
     expect(envApi).toBeDefined();
     expect(envApi!.headers).toEqual({ 'X-API-Key': 'resolved-mcp-key' });
+  });
+
+  it('loads MCP server with injectedParams', () => {
+    mkdirSync(testDir, { recursive: true });
+    writeFileSync(testConfigPath, `
+mcp:
+  servers:
+    - name: market-api
+      url: http://localhost:8001/mcp
+      headers:
+        X-API-Key: my-key
+      injectedParams:
+        api_key: my-key
+`);
+
+    const config = loadConfig({ configPath: testConfigPath });
+
+    const server = config.mcp.servers.find(s => s.name === 'market-api');
+    expect(server).toBeDefined();
+    expect(server!.injectedParams).toEqual({ api_key: 'my-key' });
   });
 
   it('defaults to empty MCP servers list', () => {
@@ -592,6 +612,209 @@ permissions:
     });
   });
 
+  describe('tools config', () => {
+    it('returns empty tools.market_data by default', () => {
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.market_data.api_key).toBeUndefined();
+    });
+
+    it('loads tools.market_data.api_key from config file', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+tools:
+  market_data:
+    api_key: test-rapidapi-key
+`);
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.market_data.api_key).toBe('test-rapidapi-key');
+    });
+
+    it('auto-detects RAPIDAPI_KEY from env', () => {
+      vi.stubEnv('RAPIDAPI_KEY', 'rapidapi-auto-detect');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.market_data.api_key).toBe('rapidapi-auto-detect');
+    });
+
+    it('reports envKeysUsed for RAPIDAPI_KEY', () => {
+      vi.stubEnv('RAPIDAPI_KEY', 'rapidapi-meta');
+
+      const result = loadConfigWithMeta({ configPath: testConfigPath });
+      expect(result.envKeysUsed).toContain('RAPIDAPI_KEY');
+      expect(result.config.tools.market_data.api_key).toBe('rapidapi-meta');
+    });
+
+    it('does not override explicit tools.market_data.api_key with env var', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+tools:
+  market_data:
+    api_key: explicit-key
+`);
+      vi.stubEnv('RAPIDAPI_KEY', 'env-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.market_data.api_key).toBe('explicit-key');
+    });
+
+    it('resolves env: prefix in tools.market_data.api_key', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+tools:
+  market_data:
+    api_key: env:MY_RAPIDAPI_KEY
+`);
+      vi.stubEnv('MY_RAPIDAPI_KEY', 'resolved-rapidapi-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.market_data.api_key).toBe('resolved-rapidapi-key');
+    });
+
+    it('clears unresolved env ref and falls back to RAPIDAPI_KEY', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+tools:
+  market_data:
+    api_key: env:NONEXISTENT_KEY
+`);
+      vi.stubEnv('RAPIDAPI_KEY', 'fallback-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.market_data.api_key).toBe('fallback-key');
+    });
+  });
+
+  describe('marketonepager config', () => {
+    it('returns empty tools.marketonepager by default', () => {
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.marketonepager.api_key).toBeUndefined();
+      expect(config.tools.marketonepager.url).toBeUndefined();
+    });
+
+    it('auto-detects MARKETONEPAGER_KEY from env', () => {
+      vi.stubEnv('MARKETONEPAGER_KEY', 'mop-test-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.marketonepager.api_key).toBe('mop-test-key');
+    });
+
+    it('auto-detects MARKETONEPAGER_URL from env', () => {
+      vi.stubEnv('MARKETONEPAGER_URL', 'http://custom:9000/mcp');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.marketonepager.url).toBe('http://custom:9000/mcp');
+    });
+
+    it('reports envKeysUsed for MARKETONEPAGER_KEY', () => {
+      vi.stubEnv('MARKETONEPAGER_KEY', 'mop-meta-key');
+
+      const result = loadConfigWithMeta({ configPath: testConfigPath });
+      expect(result.envKeysUsed).toContain('MARKETONEPAGER_KEY');
+      expect(result.config.tools.marketonepager.api_key).toBe('mop-meta-key');
+    });
+
+    it('loads tools.marketonepager from config file', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+tools:
+  marketonepager:
+    api_key: explicit-mop-key
+    url: http://myserver:8001/mcp
+`);
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.marketonepager.api_key).toBe('explicit-mop-key');
+      expect(config.tools.marketonepager.url).toBe('http://myserver:8001/mcp');
+    });
+
+    it('does not override explicit config with env var', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+tools:
+  marketonepager:
+    api_key: explicit-key
+`);
+      vi.stubEnv('MARKETONEPAGER_KEY', 'env-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.marketonepager.api_key).toBe('explicit-key');
+    });
+
+    it('clears unresolved env ref and falls back to MARKETONEPAGER_KEY', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+tools:
+  marketonepager:
+    api_key: env:NONEXISTENT_KEY
+`);
+      vi.stubEnv('MARKETONEPAGER_KEY', 'fallback-mop-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.marketonepager.api_key).toBe('fallback-mop-key');
+    });
+
+    it('resolves env: prefix in tools.marketonepager.api_key', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+tools:
+  marketonepager:
+    api_key: env:MY_MOP_KEY
+`);
+      vi.stubEnv('MY_MOP_KEY', 'resolved-mop-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.marketonepager.api_key).toBe('resolved-mop-key');
+    });
+  });
+
+  describe('news config', () => {
+    it('returns empty tools.news by default', () => {
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.news.api_key).toBeUndefined();
+    });
+
+    it('auto-detects BRAVE_API_KEY from env', () => {
+      vi.stubEnv('BRAVE_API_KEY', 'brave-test-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.news.api_key).toBe('brave-test-key');
+    });
+
+    it('reports envKeysUsed for BRAVE_API_KEY', () => {
+      vi.stubEnv('BRAVE_API_KEY', 'brave-meta-key');
+
+      const result = loadConfigWithMeta({ configPath: testConfigPath });
+      expect(result.envKeysUsed).toContain('BRAVE_API_KEY');
+      expect(result.config.tools.news.api_key).toBe('brave-meta-key');
+    });
+
+    it('loads tools.news.api_key from config file', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+tools:
+  news:
+    api_key: explicit-brave-key
+`);
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.news.api_key).toBe('explicit-brave-key');
+    });
+
+    it('does not override explicit config with env var', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+tools:
+  news:
+    api_key: explicit-key
+`);
+      vi.stubEnv('BRAVE_API_KEY', 'env-key');
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.tools.news.api_key).toBe('explicit-key');
+    });
+  });
+
   describe('setConfigValue', () => {
     it('sets a string config value', () => {
       mkdirSync(testDir, { recursive: true });
@@ -632,6 +855,212 @@ permissions:
 
     it('throws when config file does not exist', () => {
       expect(() => setConfigValue('defaults.provider', 'openai', { configPath: '/nonexistent/path/config.yaml' })).toThrow(ConfigError);
+    });
+  });
+
+  describe('addMcpServer', () => {
+    it('adds a stdio server to existing config', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `defaults:\n  provider: anthropic\n`);
+
+      addMcpServer({ name: 'my-server', command: 'npx', args: ['-y', '@some/mcp'] }, { configPath: testConfigPath });
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.mcp.servers).toHaveLength(1);
+      expect(config.mcp.servers[0].name).toBe('my-server');
+      expect(config.mcp.servers[0].command).toBe('npx');
+      expect(config.mcp.servers[0].args).toEqual(['-y', '@some/mcp']);
+    });
+
+    it('adds an HTTP server with headers', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `defaults:\n  provider: anthropic\n`);
+
+      addMcpServer({
+        name: 'api-server',
+        url: 'http://localhost:3001/mcp',
+        headers: { Authorization: 'Bearer token123' },
+      }, { configPath: testConfigPath });
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.mcp.servers).toHaveLength(1);
+      expect(config.mcp.servers[0].url).toBe('http://localhost:3001/mcp');
+      expect(config.mcp.servers[0].headers).toEqual({ Authorization: 'Bearer token123' });
+    });
+
+    it('creates config file and directories if they do not exist', () => {
+      const nestedPath = resolve(testDir, 'sub', 'dir', 'config.yaml');
+      expect(existsSync(nestedPath)).toBe(false);
+
+      addMcpServer({ name: 'new-server', command: 'echo', args: ['hello'] }, { configPath: nestedPath });
+
+      expect(existsSync(nestedPath)).toBe(true);
+      const config = loadConfig({ configPath: nestedPath });
+      expect(config.mcp.servers).toHaveLength(1);
+      expect(config.mcp.servers[0].name).toBe('new-server');
+    });
+
+    it('rejects duplicate server names', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+mcp:
+  servers:
+    - name: existing
+      command: echo
+`);
+
+      expect(() => addMcpServer({ name: 'existing', command: 'node' }, { configPath: testConfigPath }))
+        .toThrow(/already exists/);
+    });
+
+    it('validates against schema after adding', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, '');
+
+      // Server with neither command nor url should fail validation
+      expect(() => addMcpServer({ name: 'invalid' }, { configPath: testConfigPath }))
+        .toThrow(ConfigError);
+    });
+
+    it('preserves existing config entries when adding', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+defaults:
+  provider: openai
+  max_budget_usd: 10.0
+mcp:
+  servers:
+    - name: first
+      command: echo
+`);
+
+      addMcpServer({ name: 'second', command: 'node', args: ['server.js'] }, { configPath: testConfigPath });
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.defaults.provider).toBe('openai');
+      expect(config.defaults.max_budget_usd).toBe(10.0);
+      expect(config.mcp.servers).toHaveLength(2);
+      expect(config.mcp.servers[0].name).toBe('first');
+      expect(config.mcp.servers[1].name).toBe('second');
+    });
+
+    it('adds a server with env vars', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, '');
+
+      addMcpServer({ name: 'env-server', command: 'node', env: { API_KEY: 'secret' } }, { configPath: testConfigPath });
+
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.mcp.servers[0].env).toEqual({ API_KEY: 'secret' });
+    });
+  });
+
+  describe('removeMcpServer', () => {
+    it('removes a server by name', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+mcp:
+  servers:
+    - name: to-remove
+      command: echo
+    - name: keep
+      command: node
+`);
+
+      const removed = removeMcpServer('to-remove', { configPath: testConfigPath });
+
+      expect(removed).toBe(true);
+      const config = loadConfig({ configPath: testConfigPath });
+      expect(config.mcp.servers).toHaveLength(1);
+      expect(config.mcp.servers[0].name).toBe('keep');
+    });
+
+    it('returns false when server does not exist', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+mcp:
+  servers:
+    - name: other
+      command: echo
+`);
+
+      const removed = removeMcpServer('nonexistent', { configPath: testConfigPath });
+      expect(removed).toBe(false);
+    });
+
+    it('throws when config file does not exist', () => {
+      expect(() => removeMcpServer('anything', { configPath: '/nonexistent/config.yaml' }))
+        .toThrow(ConfigError);
+    });
+  });
+
+  describe('getMcpServers', () => {
+    it('returns empty array when no servers configured', () => {
+      const servers = getMcpServers({ configPath: testConfigPath });
+      expect(servers).toEqual([]);
+    });
+
+    it('returns all configured servers', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+mcp:
+  servers:
+    - name: server-a
+      command: echo
+    - name: server-b
+      url: http://localhost:3000/mcp
+`);
+
+      const servers = getMcpServers({ configPath: testConfigPath });
+      expect(servers).toHaveLength(2);
+      expect(servers[0].name).toBe('server-a');
+      expect(servers[1].name).toBe('server-b');
+    });
+
+    it('preserves env var references in raw config', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+mcp:
+  servers:
+    - name: env-server
+      url: http://localhost:3000/mcp
+      headers:
+        Authorization: env:MY_TOKEN
+`);
+
+      const servers = getMcpServers({ configPath: testConfigPath });
+      expect(servers[0].headers?.Authorization).toBe('env:MY_TOKEN');
+    });
+  });
+
+  describe('getMcpServer', () => {
+    it('returns a specific server by name', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+mcp:
+  servers:
+    - name: target
+      command: node
+      args: ["server.js"]
+`);
+
+      const server = getMcpServer('target', { configPath: testConfigPath });
+      expect(server).toBeDefined();
+      expect(server!.name).toBe('target');
+      expect(server!.command).toBe('node');
+    });
+
+    it('returns undefined for nonexistent server', () => {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(testConfigPath, `
+mcp:
+  servers:
+    - name: other
+      command: echo
+`);
+
+      const server = getMcpServer('missing', { configPath: testConfigPath });
+      expect(server).toBeUndefined();
     });
   });
 });
