@@ -9,6 +9,7 @@ import type { ContextBundle } from '../../context/types.js';
 import type { OrchestratorConfig, ChatMessage } from '../types.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import { createOrchestratorTools } from './tools.js';
+import { ThinkTagParser } from './think-tag-parser.js';
 
 function getModel(config: Config) {
   const provider = config.defaults.provider;
@@ -80,10 +81,10 @@ export async function runOrchestrator(
   mcpClient?: MCPClientManager,
   options: RunOrchestratorOptions = {},
 ): Promise<OrchestratorResult> {
-  const mcpToolNames = mcpClient
-    ? mcpClient.listTools().map(t => t.name)
+  const mcpTools = mcpClient
+    ? mcpClient.listTools().map(t => ({ name: t.name, description: t.description }))
     : [];
-  const systemPrompt = buildSystemPrompt(config, skillNames, mcpToolNames, {
+  const systemPrompt = buildSystemPrompt(config, skillNames, mcpTools, {
     planMode: options.planMode,
     readOnly: options.readOnly,
     contextBundle: options.contextBundle,
@@ -119,6 +120,20 @@ export async function runOrchestrator(
       }
     : undefined;
 
+  // Parse <think>...</think> tags from text-delta chunks.
+  // Models like DeepSeek/Qwen embed reasoning in these tags instead of
+  // using a separate reasoning-delta stream part.
+  const thinkParser = new ThinkTagParser(
+    (text) => {
+      content += text;
+      orchestratorConfig.onTextDelta(text);
+    },
+    (thinkText) => {
+      thinking += thinkText;
+      orchestratorConfig.onReasoningDelta(thinkText);
+    },
+  );
+
   const result = streamText({
     model,
     system: systemPrompt,
@@ -132,8 +147,7 @@ export async function runOrchestrator(
   for await (const part of result.fullStream) {
     switch (part.type) {
       case 'text-delta':
-        content += part.text;
-        orchestratorConfig.onTextDelta(part.text);
+        thinkParser.push(part.text);
         break;
       case 'reasoning-delta':
         thinking += part.text;
@@ -157,6 +171,9 @@ export async function runOrchestrator(
         break;
     }
   }
+
+  // Flush any buffered partial tags
+  thinkParser.end();
 
   const usage = await result.usage;
 

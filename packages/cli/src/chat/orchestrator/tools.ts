@@ -278,6 +278,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
             userAgent: config.providers.anthropic.api_key
               ? 'scrutari-cli/0.1 (scrutari@example.com)'
               : undefined,
+            marketDataApiKey: config.tools.market_data.api_key,
             ...(skill.tools_config ?? {}),
           },
         };
@@ -554,25 +555,28 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
       },
     },
 
-    get_quote: {
-      description: 'Get a real-time stock quote with price, change, volume, and market cap.',
-      inputSchema: z.object({
-        ticker: z.string().describe('Stock ticker symbol (e.g., AAPL, NVDA)'),
-      }),
-      execute: async ({ ticker }: { ticker: string }) => {
-        const toolRegistry = new ToolRegistry();
-        const toolContext: ToolContext = {
-          config: {
-            userAgent: 'scrutari-cli/0.1 (scrutari@example.com)',
-          },
-        };
-        const result = await toolRegistry.executeTool('market_data_get_quote', { ticker: ticker.toUpperCase() }, toolContext);
-        if (!result.success) {
-          return { error: result.error ?? 'Failed to fetch quote' };
-        }
-        return result.data;
+    // Only expose get_quote when market data API key is configured
+    ...(config.tools.market_data.api_key ? {
+      get_quote: {
+        description: 'Get a real-time stock quote with price, change, volume, and market cap.',
+        inputSchema: z.object({
+          ticker: z.string().describe('Stock ticker symbol (e.g., AAPL, NVDA)'),
+        }),
+        execute: async ({ ticker }: { ticker: string }) => {
+          const toolRegistry = new ToolRegistry();
+          const toolContext: ToolContext = {
+            config: {
+              marketDataApiKey: config.tools.market_data.api_key,
+            },
+          };
+          const result = await toolRegistry.executeTool('market_data_get_quote', { ticker: ticker.toUpperCase() }, toolContext);
+          if (!result.success) {
+            return { error: result.error ?? 'Failed to fetch quote' };
+          }
+          return result.data;
+        },
       },
-    },
+    } : {}),
 
     search_filings: {
       description: 'Search SEC EDGAR for company filings (10-K, 10-Q, 8-K, etc.).',
@@ -599,23 +603,28 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
       },
     },
 
-    search_news: {
-      description: 'Search for recent financial news articles.',
-      inputSchema: z.object({
-        query: z.string().describe('Search query (e.g., "NVDA earnings", "AI chip shortage")'),
-      }),
-      execute: async ({ query }: { query: string }) => {
-        const toolRegistry = new ToolRegistry();
-        const toolContext: ToolContext = {
-          config: {},
-        };
-        const result = await toolRegistry.executeTool('news_search', { query }, toolContext);
-        if (!result.success) {
-          return { error: result.error ?? 'Failed to search news' };
-        }
-        return result.data;
+    // Only expose search_news when news API key is configured
+    ...(config.tools.news.api_key ? {
+      search_news: {
+        description: 'Search for recent financial news articles.',
+        inputSchema: z.object({
+          query: z.string().describe('Search query (e.g., "NVDA earnings", "AI chip shortage")'),
+        }),
+        execute: async ({ query }: { query: string }) => {
+          const toolRegistry = new ToolRegistry();
+          const toolContext: ToolContext = {
+            config: {
+              newsApiKey: config.tools.news.api_key,
+            },
+          };
+          const result = await toolRegistry.executeTool('news_search', { query }, toolContext);
+          if (!result.success) {
+            return { error: result.error ?? 'Failed to search news' };
+          }
+          return result.data;
+        },
       },
-    },
+    } : {}),
 
     manage_config: {
       description: 'View or update scrutari configuration.',

@@ -107,7 +107,7 @@ function buildContextSection(bundle: ContextBundle): string {
   return sections.join('\n\n');
 }
 
-export function buildSystemPrompt(config: Config, skillNames: string[], mcpToolNames: string[] = [], options: SystemPromptOptions = {}): string {
+export function buildSystemPrompt(config: Config, skillNames: string[], mcpTools: { name: string; description: string }[] = [], options: SystemPromptOptions = {}): string {
   let skillList: string;
   if (options.skillSummaries && options.skillSummaries.length > 0) {
     skillList = options.skillSummaries.map(s => `  - **${s.name}** — ${s.description}`).join('\n');
@@ -117,8 +117,8 @@ export function buildSystemPrompt(config: Config, skillNames: string[], mcpToolN
     skillList = '  (none found)';
   }
 
-  const mcpSection = mcpToolNames.length > 0
-    ? `\n## MCP Tools (External)\n\nThe following tools are provided by connected MCP servers and can be called directly:\n${mcpToolNames.map(t => `  - **${t}**`).join('\n')}\n\nThese tools are also available within pipelines when a skill references the MCP server name in its tools_required/tools_optional.\n`
+  const mcpSection = mcpTools.length > 0
+    ? `\n## MCP Tools (External)\n\nThe following tools are provided by connected MCP servers and can be called directly:\n${mcpTools.map(t => `  - **${t.name}** — ${t.description}`).join('\n')}\n\nThese tools are also available within pipelines when a skill references the MCP server name in its tools_required/tools_optional.\n`
     : '';
 
   const agentSkillList = options.agentSkillSummaries && options.agentSkillSummaries.length > 0
@@ -129,52 +129,68 @@ export function buildSystemPrompt(config: Config, skillNames: string[], mcpToolN
     ? `\n## Active Agent Skill: ${options.activeAgentSkill.frontmatter.name}\n\n${options.activeAgentSkill.body}\n`
     : '';
 
+  // Build tool list dynamically — only include tools whose API keys are configured
+  const toolDocs: string[] = [];
+
+  toolDocs.push(`**run_pipeline** — Run a skill-based analysis pipeline. Use this for deep analysis.
+   - Requires: skill (string), inputs (object — key-value pairs matching the skill's input schema)
+   - Optional: budget (number), model (string — override the model for all stages; omit to use each stage's configured model)
+   - Use list_skills to see what inputs each skill requires.
+   - Example: run_pipeline({ skill: "deep-dive", inputs: { ticker: "NVDA" } })
+   - Example: run_pipeline({ skill: "comp-analysis", inputs: { tickers: ["AAPL", "NVDA", "MSFT"] } })`);
+
+  toolDocs.push(`**list_skills** — List all available analysis skills. Use when the user asks what you can do or what skills are available. Pass detail=true for full info.`);
+
+  toolDocs.push(`**get_skill_detail** — Get detailed info about a specific skill (inputs, stages, tools, cost estimate). Use when the user asks about a particular skill.`);
+
+  if (config.tools.market_data.api_key) {
+    toolDocs.push(`**get_quote** — Get a real-time stock quote. Use for quick price checks (e.g., "what is AAPL trading at?").
+   - Requires: ticker (string)`);
+  }
+
+  toolDocs.push(`**search_filings** — Search SEC EDGAR for company filings. Use when the user asks about SEC filings, 10-K, 10-Q, etc.
+   - Requires: ticker (string), optional: formType (string)`);
+
+  if (config.tools.news.api_key) {
+    toolDocs.push(`**search_news** — Search for financial news articles. Use when the user asks about recent news.
+   - Requires: query (string)`);
+  }
+
+  toolDocs.push(`**manage_config** — View or update scrutari configuration.
+   - action: 'show' to display current config, 'set' to update a value`);
+
+  toolDocs.push(`**list_sessions** — List past chat sessions.`);
+
+  toolDocs.push(`**activate_skill** — Activate an agent skill to load its domain expertise into context. Use when the user asks about a topic matching an agent skill.
+   - Requires: name (string)`);
+
+  toolDocs.push(`**read_skill_resource** — Read a reference file from the active agent skill (e.g., guides, glossaries).
+    - Requires: path (string, relative to skill directory like "references/guide.md")`);
+
+  toolDocs.push(`**preview_pipeline** — Preview a pipeline execution plan with real cost and time estimates without executing.
+    - Same inputs as run_pipeline (skill, inputs, model)
+    - Returns: stage list, execution DAG, estimated cost and time per stage and total
+    - Use this in plan mode instead of run_pipeline`);
+
+  const toolList = toolDocs.map((doc, i) => `${i + 1}. ${doc}`).join('\n\n');
+
+  // Build conditional allowed-tool lists for plan/read-only mode
+  const dataLookupTools: string[] = [];
+  if (config.tools.market_data.api_key) dataLookupTools.push('get_quote');
+  dataLookupTools.push('search_filings');
+  if (config.tools.news.api_key) dataLookupTools.push('search_news');
+
   return `You are scrutari, an AI-powered financial analysis assistant. You help users analyze stocks, compare companies, and research financial data.
 
 ## Available Tools
 
 You have access to the following tools:
 
-1. **run_pipeline** — Run a skill-based analysis pipeline. Use this for deep analysis.
-   - Requires: skill (string), inputs (object — key-value pairs matching the skill's input schema)
-   - Optional: budget (number), model (string — override the model for all stages; omit to use each stage's configured model)
-   - Use list_skills to see what inputs each skill requires.
-   - Example: run_pipeline({ skill: "deep-dive", inputs: { ticker: "NVDA" } })
-   - Example: run_pipeline({ skill: "comp-analysis", inputs: { tickers: ["AAPL", "NVDA", "MSFT"] } })
-
-2. **list_skills** — List all available analysis skills. Use when the user asks what you can do or what skills are available. Pass detail=true for full info.
-
-3. **get_skill_detail** — Get detailed info about a specific skill (inputs, stages, tools, cost estimate). Use when the user asks about a particular skill.
-
-4. **get_quote** — Get a real-time stock quote. Use for quick price checks (e.g., "what is AAPL trading at?").
-   - Requires: ticker (string)
-
-5. **search_filings** — Search SEC EDGAR for company filings. Use when the user asks about SEC filings, 10-K, 10-Q, etc.
-   - Requires: ticker (string), optional: formType (string)
-
-6. **search_news** — Search for financial news articles. Use when the user asks about recent news.
-   - Requires: query (string)
-
-7. **manage_config** — View or update scrutari configuration.
-   - action: 'show' to display current config, 'set' to update a value
-
-8. **list_sessions** — List past chat sessions.
-
-9. **activate_skill** — Activate an agent skill to load its domain expertise into context. Use when the user asks about a topic matching an agent skill.
-   - Requires: name (string)
-
-10. **read_skill_resource** — Read a reference file from the active agent skill (e.g., guides, glossaries).
-    - Requires: path (string, relative to skill directory like "references/guide.md")
-
-11. **preview_pipeline** — Preview a pipeline execution plan with real cost and time estimates without executing.
-    - Same inputs as run_pipeline (skill, inputs, model)
-    - Returns: stage list, execution DAG, estimated cost and time per stage and total
-    - Use this in plan mode instead of run_pipeline
+${toolList}
 ${mcpSection}
 ## Available Pipeline Skills
 ${skillList}
 ${agentSkillList ? `\n## Agent Skills\n\nAgent skills provide domain expertise and methodology guidance. Use activate_skill to load one into context.\n${agentSkillList}\n` : ''}
-
 ## Configuration
 - Provider: ${config.defaults.provider}
 - Model: ${config.defaults.model}
@@ -182,8 +198,7 @@ ${agentSkillList ? `\n## Agent Skills\n\nAgent skills provide domain expertise a
 ${options.contextBundle ? '\n' + buildContextSection(options.contextBundle) + '\n' : ''}
 ## Guidelines
 - When the user asks to analyze a stock or run a pipeline, use run_pipeline with the appropriate skill and inputs.
-- Default skill is "deep-dive" unless the user specifies otherwise.
-- For simple price queries, use get_quote instead of running a full pipeline.
+- Default skill is "deep-dive" unless the user specifies otherwise.${config.tools.market_data.api_key ? '\n- For simple price queries, use get_quote instead of running a full pipeline.' : ''}
 - Be concise in responses. Show key findings clearly.
 - If a tool fails, explain the error and suggest alternatives.
 - When presenting analysis results, format them clearly with headers and bullet points.
@@ -193,7 +208,7 @@ ${activeSkillSection}${options.planMode ? `
 ## Plan Mode (ACTIVE)
 
 You are currently in PLAN MODE. You may use read-only tools to gather real data:
-- **Allowed**: list_skills, get_skill_detail, get_quote, search_filings, search_news, preview_pipeline
+- **Allowed**: list_skills, get_skill_detail, ${dataLookupTools.join(', ')}, preview_pipeline
 - **Blocked**: run_pipeline (use preview_pipeline instead to get cost/time estimates)
 
 When the user asks for an analysis:
@@ -205,7 +220,7 @@ When the user asks for an analysis:
 ## Read-Only Mode (ACTIVE)
 
 You are in READ-ONLY mode. Only read-only tools are available:
-- get_quote, search_filings, search_news — Data lookups
+- ${dataLookupTools.join(', ')} — Data lookups
 - list_skills, get_skill_detail, preview_pipeline — Skill information
 - list_sessions — Session listing
 

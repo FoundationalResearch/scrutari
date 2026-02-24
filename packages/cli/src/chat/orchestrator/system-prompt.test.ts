@@ -3,7 +3,7 @@ import type { Config } from '../../config/index.js';
 import type { ContextBundle } from '../../context/types.js';
 import { buildSystemPrompt } from './system-prompt.js';
 
-function makeConfig(): Config {
+function makeConfig(overrides?: Partial<Config>): Config {
   return {
     defaults: {
       provider: 'anthropic',
@@ -25,6 +25,8 @@ function makeConfig(): Config {
     agents: { research: {}, explore: {}, verify: {}, default: {} },
     compaction: { enabled: true, auto_threshold: 0.85, preserve_turns: 4, model: 'claude-haiku-3-5-20241022' },
     permissions: {},
+    tools: { market_data: {}, marketonepager: {}, news: {} },
+    ...overrides,
   } as Config;
 }
 
@@ -52,11 +54,16 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('MCP Tools');
   });
 
-  it('includes MCP tools section when MCP tools are provided', () => {
-    const prompt = buildSystemPrompt(makeConfig(), ['deep-dive'], ['bloomberg/get_quote', 'bloomberg/get_news']);
+  it('includes MCP tools section with descriptions when MCP tools are provided', () => {
+    const prompt = buildSystemPrompt(makeConfig(), ['deep-dive'], [
+      { name: 'bloomberg/get_quote', description: 'Get Bloomberg terminal quotes' },
+      { name: 'bloomberg/get_news', description: 'Search Bloomberg news' },
+    ]);
     expect(prompt).toContain('MCP Tools');
     expect(prompt).toContain('bloomberg/get_quote');
+    expect(prompt).toContain('Get Bloomberg terminal quotes');
     expect(prompt).toContain('bloomberg/get_news');
+    expect(prompt).toContain('Search Bloomberg news');
   });
 
   it('includes run_pipeline documentation', () => {
@@ -87,9 +94,7 @@ describe('buildSystemPrompt', () => {
   it('includes read-only mode section when readOnly is true', () => {
     const prompt = buildSystemPrompt(makeConfig(), [], [], { readOnly: true });
     expect(prompt).toContain('Read-Only Mode (ACTIVE)');
-    expect(prompt).toContain('get_quote');
     expect(prompt).toContain('search_filings');
-    expect(prompt).toContain('search_news');
     expect(prompt).toContain('Pipeline execution (run_pipeline) and config changes are not available');
   });
 
@@ -101,6 +106,103 @@ describe('buildSystemPrompt', () => {
   it('does not include read-only section when options omitted', () => {
     const prompt = buildSystemPrompt(makeConfig(), []);
     expect(prompt).not.toContain('Read-Only Mode (ACTIVE)');
+  });
+
+  describe('conditional tool availability in prompt', () => {
+    it('excludes get_quote from prompt when market_data api_key is missing', () => {
+      const config = makeConfig();
+      const prompt = buildSystemPrompt(config, ['deep-dive']);
+      expect(prompt).not.toContain('get_quote');
+    });
+
+    it('includes get_quote in prompt when market_data api_key is set', () => {
+      const config = makeConfig({
+        tools: { market_data: { api_key: 'test-rapid-key' }, marketonepager: {}, news: {} },
+      });
+      const prompt = buildSystemPrompt(config, ['deep-dive']);
+      expect(prompt).toContain('get_quote');
+      expect(prompt).toContain('real-time stock quote');
+    });
+
+    it('excludes search_news from prompt when news api_key is missing', () => {
+      const config = makeConfig();
+      const prompt = buildSystemPrompt(config, ['deep-dive']);
+      expect(prompt).not.toContain('search_news');
+    });
+
+    it('includes search_news in prompt when news api_key is set', () => {
+      const config = makeConfig({
+        tools: { market_data: {}, marketonepager: {}, news: { api_key: 'test-brave-key' } },
+      });
+      const prompt = buildSystemPrompt(config, ['deep-dive']);
+      expect(prompt).toContain('search_news');
+      expect(prompt).toContain('financial news');
+    });
+
+    it('always includes search_filings in prompt (no API key required)', () => {
+      const config = makeConfig();
+      const prompt = buildSystemPrompt(config, ['deep-dive']);
+      expect(prompt).toContain('search_filings');
+      expect(prompt).toContain('SEC EDGAR');
+    });
+
+    it('includes get_quote in plan mode allowed list when api_key is set', () => {
+      const config = makeConfig({
+        tools: { market_data: { api_key: 'test-key' }, marketonepager: {}, news: {} },
+      });
+      const prompt = buildSystemPrompt(config, [], [], { planMode: true });
+      expect(prompt).toContain('get_quote');
+    });
+
+    it('excludes get_quote from plan mode allowed list when api_key is missing', () => {
+      const config = makeConfig();
+      const prompt = buildSystemPrompt(config, [], [], { planMode: true });
+      expect(prompt).not.toContain('get_quote');
+    });
+
+    it('includes search_news in read-only mode data lookups when api_key is set', () => {
+      const config = makeConfig({
+        tools: { market_data: {}, marketonepager: {}, news: { api_key: 'test-key' } },
+      });
+      const prompt = buildSystemPrompt(config, [], [], { readOnly: true });
+      expect(prompt).toContain('search_news');
+    });
+
+    it('excludes search_news from read-only mode data lookups when api_key is missing', () => {
+      const config = makeConfig();
+      const prompt = buildSystemPrompt(config, [], [], { readOnly: true });
+      expect(prompt).not.toContain('search_news');
+    });
+
+    it('numbers tools sequentially even when some are excluded', () => {
+      const config = makeConfig(); // no API keys
+      const prompt = buildSystemPrompt(config, ['deep-dive']);
+      // search_filings should still have a number, and there should be no gaps
+      const lines = prompt.split('\n');
+      const numberedLines = lines.filter(l => /^\d+\.\s+\*\*/.test(l.trim()));
+      for (let i = 0; i < numberedLines.length; i++) {
+        expect(numberedLines[i].trim()).toMatch(new RegExp(`^${i + 1}\\.`));
+      }
+    });
+  });
+
+  describe('MCP tool descriptions in prompt', () => {
+    it('includes MCP tool descriptions', () => {
+      const prompt = buildSystemPrompt(makeConfig(), ['deep-dive'], [
+        { name: 'marketonepager/get_quote', description: 'Get real-time market data and stock quotes' },
+        { name: 'marketonepager/market_healthcheck', description: 'Check market data API health status' },
+      ]);
+      expect(prompt).toContain('MCP Tools');
+      expect(prompt).toContain('marketonepager/get_quote');
+      expect(prompt).toContain('Get real-time market data and stock quotes');
+      expect(prompt).toContain('marketonepager/market_healthcheck');
+      expect(prompt).toContain('Check market data API health status');
+    });
+
+    it('does not include MCP section when mcpTools is empty array', () => {
+      const prompt = buildSystemPrompt(makeConfig(), ['deep-dive'], []);
+      expect(prompt).not.toContain('MCP Tools');
+    });
   });
 
   describe('with contextBundle', () => {

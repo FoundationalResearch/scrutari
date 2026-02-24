@@ -84,6 +84,7 @@ function makeConfig(overrides?: Partial<Config>): Config {
     mcp: { servers: [] },
     agents: { research: {}, explore: {}, verify: {}, default: {} },
     permissions: {},
+    tools: { market_data: {}, marketonepager: {}, news: {} },
     ...overrides,
   } as Config;
 }
@@ -949,6 +950,70 @@ describe('session budget enforcement', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tool availability based on API keys
+// ---------------------------------------------------------------------------
+
+describe('tool availability based on API keys', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('excludes get_quote when market_data.api_key is not configured', () => {
+    const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig());
+    expect(tools).not.toHaveProperty('get_quote');
+  });
+
+  it('includes get_quote when market_data.api_key is configured', () => {
+    const config = makeConfig({
+      tools: { market_data: { api_key: 'test-rapid-key' }, marketonepager: {}, news: {} },
+    });
+    const tools = createOrchestratorTools(config, makeOrchestratorConfig());
+    expect(tools).toHaveProperty('get_quote');
+  });
+
+  it('excludes search_news when news.api_key is not configured', () => {
+    const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig());
+    expect(tools).not.toHaveProperty('search_news');
+  });
+
+  it('includes search_news when news.api_key is configured', () => {
+    const config = makeConfig({
+      tools: { market_data: {}, marketonepager: {}, news: { api_key: 'test-brave-key' } },
+    });
+    const tools = createOrchestratorTools(config, makeOrchestratorConfig());
+    expect(tools).toHaveProperty('search_news');
+  });
+
+  it('always includes search_filings (no API key required)', () => {
+    const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig());
+    expect(tools).toHaveProperty('search_filings');
+  });
+
+  it('excludes get_quote from read-only mode when api_key is missing', () => {
+    const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig(), undefined, { readOnly: true });
+    expect(tools).not.toHaveProperty('get_quote');
+    expect(tools).toHaveProperty('search_filings');
+  });
+
+  it('excludes search_news from read-only mode when api_key is missing', () => {
+    const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig(), undefined, { readOnly: true });
+    expect(tools).not.toHaveProperty('search_news');
+  });
+
+  it('always includes non-api-key-gated tools regardless of api key config', () => {
+    const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig());
+    expect(tools).toHaveProperty('run_pipeline');
+    expect(tools).toHaveProperty('list_skills');
+    expect(tools).toHaveProperty('get_skill_detail');
+    expect(tools).toHaveProperty('manage_config');
+    expect(tools).toHaveProperty('list_sessions');
+    expect(tools).toHaveProperty('activate_skill');
+    expect(tools).toHaveProperty('read_skill_resource');
+    expect(tools).toHaveProperty('preview_pipeline');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Read-only mode tests
 // ---------------------------------------------------------------------------
 
@@ -958,7 +1023,10 @@ describe('read-only mode', () => {
   });
 
   it('only includes read-only tools when readOnly is true', () => {
-    const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig(), undefined, {
+    const config = makeConfig({
+      tools: { market_data: { api_key: 'test-key' }, marketonepager: {}, news: { api_key: 'test-key' } },
+    });
+    const tools = createOrchestratorTools(config, makeOrchestratorConfig(), undefined, {
       readOnly: true,
     });
 
@@ -981,8 +1049,11 @@ describe('read-only mode', () => {
     expect(tools).not.toHaveProperty('read_skill_resource');
   });
 
-  it('allows get_quote in read-only mode', () => {
-    const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig(), undefined, {
+  it('allows get_quote in read-only mode when api_key is set', () => {
+    const config = makeConfig({
+      tools: { market_data: { api_key: 'test-key' }, marketonepager: {}, news: {} },
+    });
+    const tools = createOrchestratorTools(config, makeOrchestratorConfig(), undefined, {
       readOnly: true,
     });
 
@@ -1014,13 +1085,17 @@ describe('read-only mode', () => {
     expect(result).toHaveProperty('provider');
   });
 
-  it('includes all tools when readOnly is false', () => {
-    const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig(), undefined, {
+  it('includes all tools when readOnly is false and api keys are set', () => {
+    const config = makeConfig({
+      tools: { market_data: { api_key: 'test-key' }, marketonepager: {}, news: { api_key: 'test-key' } },
+    });
+    const tools = createOrchestratorTools(config, makeOrchestratorConfig(), undefined, {
       readOnly: false,
     });
 
     expect(tools).toHaveProperty('run_pipeline');
     expect(tools).toHaveProperty('get_quote');
+    expect(tools).toHaveProperty('search_news');
     expect(tools).toHaveProperty('activate_skill');
   });
 });
@@ -1210,8 +1285,11 @@ describe('tool permissions', () => {
   });
 
   it('deny applies to non-pipeline tools like search_news', async () => {
+    const config = makeConfig({
+      tools: { market_data: {}, marketonepager: {}, news: { api_key: 'test-key' } },
+    });
     const tools = createOrchestratorTools(
-      makeConfig(),
+      config,
       makeOrchestratorConfig(),
       undefined,
       { permissions: { search_news: 'deny' } },
@@ -1226,9 +1304,12 @@ describe('tool permissions', () => {
 
   it('confirm applies to non-pipeline tools like get_quote', async () => {
     const onPermissionRequired = vi.fn().mockResolvedValue(false);
+    const config = makeConfig({
+      tools: { market_data: { api_key: 'test-key' }, marketonepager: {}, news: {} },
+    });
 
     const tools = createOrchestratorTools(
-      makeConfig(),
+      config,
       makeOrchestratorConfig({ onPermissionRequired }),
       undefined,
       { permissions: { get_quote: 'confirm' } },
@@ -1256,9 +1337,12 @@ describe('read-only mode interactions', () => {
     const mcpClient = makeMockMCPClient([
       { name: 'bloomberg/get_quote', description: 'Get Bloomberg quote', serverName: 'bloomberg' },
     ]);
+    const config = makeConfig({
+      tools: { market_data: { api_key: 'test-key' }, marketonepager: {}, news: {} },
+    });
 
     const tools = createOrchestratorTools(
-      makeConfig(),
+      config,
       makeOrchestratorConfig(),
       mcpClient,
       { readOnly: true },
@@ -1273,9 +1357,12 @@ describe('read-only mode interactions', () => {
 
   it('permissions are not applied when read-only mode filters tools', () => {
     const onPermissionRequired = vi.fn();
+    const config = makeConfig({
+      tools: { market_data: { api_key: 'test-key' }, marketonepager: {}, news: {} },
+    });
 
     const tools = createOrchestratorTools(
-      makeConfig(),
+      config,
       makeOrchestratorConfig({ onPermissionRequired }),
       undefined,
       {
