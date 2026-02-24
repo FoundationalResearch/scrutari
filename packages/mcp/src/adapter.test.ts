@@ -477,3 +477,323 @@ describe('adaptMCPTool', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// $ref / $defs resolution
+// ---------------------------------------------------------------------------
+
+describe('$ref/$defs resolution', () => {
+  it('resolves $ref to $defs definition in root schema', () => {
+    const schema = jsonSchemaToZod({
+      type: 'object',
+      properties: {
+        status: { $ref: '#/$defs/Status' },
+      },
+      required: ['status'],
+      $defs: {
+        Status: { type: 'string', enum: ['active', 'inactive'] },
+      },
+    });
+
+    expect(schema.parse({ status: 'active' })).toEqual({ status: 'active' });
+    expect(() => schema.parse({ status: 'unknown' })).toThrow();
+  });
+
+  it('resolves $ref to nested object definition (real MCP pattern)', () => {
+    const schema = jsonSchemaToZod({
+      type: 'object',
+      properties: {
+        request: { $ref: '#/$defs/SnapshotRequest' },
+      },
+      required: ['request'],
+      $defs: {
+        SnapshotRequest: {
+          type: 'object',
+          properties: {
+            market_type: { type: 'string', enum: ['stocks', 'options', 'crypto'] },
+            ticker: { type: 'string' },
+          },
+          required: ['market_type', 'ticker'],
+        },
+      },
+    });
+
+    const valid = { request: { market_type: 'stocks', ticker: 'NVDA' } };
+    expect(schema.parse(valid)).toEqual(valid);
+
+    // Flat params should fail — the LLM must nest them in `request`
+    expect(() => schema.parse({ market_type: 'stocks', ticker: 'NVDA' })).toThrow();
+  });
+
+  it('inherits description from referring property when definition lacks one', () => {
+    const schema = jsonSchemaPropertyToZod(
+      { $ref: '#/$defs/Ticker', description: 'The stock ticker symbol' },
+      { Ticker: { type: 'string' } },
+    );
+
+    expect(schema.description).toBe('The stock ticker symbol');
+    expect(schema.parse('AAPL')).toBe('AAPL');
+  });
+
+  it('preserves definition description when it has one', () => {
+    const schema = jsonSchemaPropertyToZod(
+      { $ref: '#/$defs/Ticker', description: 'Prop description' },
+      { Ticker: { type: 'string', description: 'Def description' } },
+    );
+
+    expect(schema.description).toBe('Def description');
+  });
+
+  it('falls back to z.unknown() for unresolvable $ref', () => {
+    const schema = jsonSchemaPropertyToZod(
+      { $ref: '#/$defs/NonExistent' },
+      {},
+    );
+
+    // Should accept anything (z.unknown())
+    expect(schema.parse('hello')).toBe('hello');
+    expect(schema.parse(42)).toBe(42);
+  });
+
+  it('falls back to z.unknown() for unsupported $ref format', () => {
+    const schema = jsonSchemaPropertyToZod(
+      { $ref: 'http://example.com/schema.json#/Foo' },
+      { Foo: { type: 'string' } },
+    );
+
+    expect(schema.parse(123)).toBe(123);
+  });
+
+  it('handles $ref in array items', () => {
+    const schema = jsonSchemaToZod({
+      type: 'object',
+      properties: {
+        tickers: {
+          type: 'array',
+          items: { $ref: '#/$defs/Ticker' },
+        },
+      },
+      required: ['tickers'],
+      $defs: {
+        Ticker: { type: 'string', minLength: 1 },
+      },
+    });
+
+    expect(schema.parse({ tickers: ['AAPL', 'NVDA'] })).toEqual({ tickers: ['AAPL', 'NVDA'] });
+    expect(() => schema.parse({ tickers: [123] })).toThrow();
+    expect(() => schema.parse({ tickers: [''] })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// anyOf handling
+// ---------------------------------------------------------------------------
+
+describe('anyOf handling', () => {
+  it('converts multiple string formats to z.string()', () => {
+    const schema = jsonSchemaPropertyToZod({
+      anyOf: [
+        { type: 'string', format: 'date' },
+        { type: 'string', format: 'date-time' },
+      ],
+    });
+
+    expect(schema.parse('2024-01-01')).toBe('2024-01-01');
+    expect(schema.parse('2024-01-01T00:00:00Z')).toBe('2024-01-01T00:00:00Z');
+    expect(() => schema.parse(42)).toThrow();
+  });
+
+  it('converts nullable pattern (boolean|null) to .nullable()', () => {
+    const schema = jsonSchemaPropertyToZod({
+      anyOf: [
+        { type: 'boolean' },
+        { type: 'null' },
+      ],
+    });
+
+    expect(schema.parse(true)).toBe(true);
+    expect(schema.parse(null)).toBe(null);
+    expect(() => schema.parse('yes')).toThrow();
+  });
+
+  it('converts nullable pattern (string|null) to .nullable()', () => {
+    const schema = jsonSchemaPropertyToZod({
+      anyOf: [
+        { type: 'string' },
+        { type: 'null' },
+      ],
+    });
+
+    expect(schema.parse('hello')).toBe('hello');
+    expect(schema.parse(null)).toBe(null);
+    expect(() => schema.parse(42)).toThrow();
+  });
+
+  it('converts string + string enum to z.string()', () => {
+    const schema = jsonSchemaPropertyToZod({
+      anyOf: [
+        { type: 'string' },
+        { type: 'string', enum: ['asc', 'desc'] },
+      ],
+    });
+
+    expect(schema.parse('asc')).toBe('asc');
+    expect(schema.parse('any-string')).toBe('any-string');
+    expect(() => schema.parse(42)).toThrow();
+  });
+
+  it('converts different types to z.union()', () => {
+    const schema = jsonSchemaPropertyToZod({
+      anyOf: [
+        { type: 'string' },
+        { type: 'number' },
+      ],
+    });
+
+    expect(schema.parse('hello')).toBe('hello');
+    expect(schema.parse(42)).toBe(42);
+    expect(() => schema.parse(true)).toThrow();
+  });
+
+  it('unwraps single branch', () => {
+    const schema = jsonSchemaPropertyToZod({
+      anyOf: [{ type: 'integer' }],
+    });
+
+    expect(schema.parse(42)).toBe(42);
+    expect(() => schema.parse(42.5)).toThrow();
+  });
+
+  it('preserves description', () => {
+    const schema = jsonSchemaPropertyToZod({
+      anyOf: [{ type: 'string' }],
+      description: 'A flexible field',
+    });
+
+    expect(schema.description).toBe('A flexible field');
+  });
+
+  it('returns z.unknown() for empty anyOf', () => {
+    const schema = jsonSchemaPropertyToZod({ anyOf: [] });
+    expect(schema.parse('anything')).toBe('anything');
+    expect(schema.parse(42)).toBe(42);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration: real MCP server schema patterns
+// ---------------------------------------------------------------------------
+
+describe('integration: real MCP schema patterns', () => {
+  it('full schema with $ref + anyOf validates correctly', () => {
+    // Modeled after massive_get_snapshot_ticker from Polygon MCP
+    const schema = jsonSchemaToZod({
+      type: 'object',
+      properties: {
+        request: { $ref: '#/$defs/GetSnapshotTickerRequest' },
+      },
+      required: ['request'],
+      $defs: {
+        GetSnapshotTickerRequest: {
+          type: 'object',
+          properties: {
+            market_type: {
+              type: 'string',
+              enum: ['stocks', 'options', 'indices', 'crypto', 'fx'],
+              description: 'Market type',
+            },
+            ticker: { type: 'string', description: 'Ticker symbol' },
+            include_otc: {
+              anyOf: [{ type: 'boolean' }, { type: 'null' }],
+              description: 'Include OTC securities',
+            },
+          },
+          required: ['market_type', 'ticker'],
+        },
+      },
+    });
+
+    // Valid nested call
+    const valid = {
+      request: {
+        market_type: 'stocks',
+        ticker: 'NVDA',
+        include_otc: false,
+      },
+    };
+    expect(schema.parse(valid)).toEqual(valid);
+
+    // Null is allowed for include_otc
+    const withNull = {
+      request: {
+        market_type: 'stocks',
+        ticker: 'NVDA',
+        include_otc: null,
+      },
+    };
+    expect(schema.parse(withNull)).toEqual(withNull);
+
+    // include_otc is optional
+    const minimal = {
+      request: { market_type: 'stocks', ticker: 'NVDA' },
+    };
+    expect(schema.parse(minimal)).toEqual(minimal);
+
+    // Flat params fail
+    expect(() => schema.parse({ market_type: 'stocks', ticker: 'NVDA' })).toThrow();
+  });
+
+  it('adaptMCPTool with $ref/$defs schema + injected params', async () => {
+    const mockCallTool = vi.fn<(toolName: string, args: Record<string, unknown>) => Promise<MCPToolResult>>();
+    mockCallTool.mockResolvedValueOnce({
+      success: true,
+      content: [{ type: 'text', text: '{"price": 950.5}' }],
+      isError: false,
+    });
+
+    const tool = adaptMCPTool(
+      'polygon',
+      {
+        name: 'get_snapshot',
+        description: 'Get a snapshot for a ticker',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            api_key: { type: 'string' },
+            request: { $ref: '#/$defs/SnapshotReq' },
+          },
+          required: ['api_key', 'request'],
+          $defs: {
+            SnapshotReq: {
+              type: 'object',
+              properties: {
+                market_type: { type: 'string', enum: ['stocks', 'crypto'] },
+                ticker: { type: 'string' },
+              },
+              required: ['market_type', 'ticker'],
+            },
+          },
+        } as { type: 'object'; properties?: Record<string, object>; required?: string[] },
+      },
+      mockCallTool,
+      { api_key: 'my-secret-key' },
+    );
+
+    // api_key should be stripped from schema
+    const paramSchema = tool.parameters as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(paramSchema.shape)).toEqual(['request']);
+
+    // Execute with nested request — api_key auto-injected
+    const result = await tool.execute(
+      { request: { market_type: 'stocks', ticker: 'NVDA' } },
+      {},
+    );
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ price: 950.5 });
+
+    expect(mockCallTool).toHaveBeenCalledWith('get_snapshot', {
+      request: { market_type: 'stocks', ticker: 'NVDA' },
+      api_key: 'my-secret-key',
+    });
+  });
+});

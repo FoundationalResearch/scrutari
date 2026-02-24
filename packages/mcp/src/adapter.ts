@@ -21,14 +21,111 @@ interface JsonSchema {
   oneOf?: JsonSchema[];
   anyOf?: JsonSchema[];
   allOf?: JsonSchema[];
+  $ref?: string;
+  $defs?: Record<string, JsonSchema>;
   [key: string]: unknown;
 }
 
 /**
- * Converts a JSON Schema property to a Zod schema.
- * Handles common types; falls back to z.unknown() for complex schemas.
+ * Resolves a JSON Schema `$ref` string (e.g. `#/$defs/MyType`) against a defs map.
+ * Returns `undefined` if the ref format is unsupported or the key is missing.
+ *
+ * Note: Circular `$ref` is not handled — extremely rare in tool schemas.
  */
-export function jsonSchemaPropertyToZod(schema: JsonSchema): z.ZodTypeAny {
+function resolveRef(ref: string, defs: Record<string, JsonSchema>): JsonSchema | undefined {
+  const match = ref.match(/^#\/\$defs\/(.+)$/);
+  if (!match) return undefined;
+  return defs[match[1]];
+}
+
+/**
+ * Converts a JSON Schema `anyOf` array to a Zod schema.
+ *
+ * Priority-based conversion:
+ * - `[SomeType, { type: "null" }]` → `SomeType.nullable()`
+ * - All string branches → `z.string()` (formats are irrelevant to Zod)
+ * - 2+ distinct types → `z.union([...])`
+ * - 1 branch → unwrap directly
+ */
+function anyOfToZod(
+  branches: JsonSchema[],
+  defs: Record<string, JsonSchema>,
+  description?: string,
+): z.ZodTypeAny {
+  if (branches.length === 0) {
+    let u: z.ZodTypeAny = z.unknown();
+    if (description) u = u.describe(description);
+    return u;
+  }
+
+  // Resolve any $ref branches first
+  const resolved = branches.map(b => b.$ref ? resolveRef(b.$ref, defs) ?? b : b);
+
+  // Check for nullable pattern: [SomeType, { type: "null" }]
+  const nullIndex = resolved.findIndex(b => b.type === 'null');
+  if (nullIndex !== -1 && resolved.length === 2) {
+    const nonNull = resolved[1 - nullIndex];
+    let inner = jsonSchemaPropertyToZod(nonNull, defs);
+    let result: z.ZodTypeAny = inner.nullable();
+    if (description) result = result.describe(description);
+    return result;
+  }
+
+  // All string branches (e.g. different string formats) → z.string()
+  if (resolved.every(b => b.type === 'string')) {
+    let s: z.ZodTypeAny = z.string();
+    if (description) s = s.describe(description);
+    return s;
+  }
+
+  // Single branch → unwrap
+  if (resolved.length === 1) {
+    let result = jsonSchemaPropertyToZod(resolved[0], defs);
+    if (description) result = result.describe(description);
+    return result;
+  }
+
+  // Multiple distinct types → z.union()
+  const zodBranches = resolved.map(b => jsonSchemaPropertyToZod(b, defs));
+  if (zodBranches.length >= 2) {
+    let result: z.ZodTypeAny = z.union(
+      zodBranches as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]],
+    );
+    if (description) result = result.describe(description);
+    return result;
+  }
+
+  let u: z.ZodTypeAny = z.unknown();
+  if (description) u = u.describe(description);
+  return u;
+}
+
+/**
+ * Converts a JSON Schema property to a Zod schema.
+ * Handles common types including `$ref` and `anyOf`; falls back to z.unknown() for unsupported schemas.
+ */
+export function jsonSchemaPropertyToZod(
+  schema: JsonSchema,
+  defs: Record<string, JsonSchema> = {},
+): z.ZodTypeAny {
+  // $ref takes priority (per JSON Schema spec)
+  if (schema.$ref) {
+    const resolved = resolveRef(schema.$ref, defs);
+    if (!resolved) {
+      let u: z.ZodTypeAny = z.unknown();
+      if (schema.description) u = u.describe(schema.description);
+      return u;
+    }
+    // Use the referring property's description if the definition lacks one
+    const merged = resolved.description ? resolved : { ...resolved, description: schema.description };
+    return jsonSchemaPropertyToZod(merged, defs);
+  }
+
+  // anyOf handling
+  if (schema.anyOf && schema.anyOf.length > 0) {
+    return anyOfToZod(schema.anyOf, defs, schema.description);
+  }
+
   if (schema.enum && Array.isArray(schema.enum)) {
     const values = schema.enum as [string, ...string[]];
     if (values.length > 0 && values.every(v => typeof v === 'string')) {
@@ -64,7 +161,7 @@ export function jsonSchemaPropertyToZod(schema: JsonSchema): z.ZodTypeAny {
 
     case 'array': {
       const itemSchema = schema.items
-        ? jsonSchemaPropertyToZod(schema.items)
+        ? jsonSchemaPropertyToZod(schema.items, defs)
         : z.unknown();
       let a: z.ZodTypeAny = z.array(itemSchema);
       if (schema.description) a = a.describe(schema.description);
@@ -73,7 +170,7 @@ export function jsonSchemaPropertyToZod(schema: JsonSchema): z.ZodTypeAny {
 
     case 'object': {
       if (schema.properties) {
-        return jsonSchemaToZod(schema);
+        return jsonSchemaToZod(schema, defs);
       }
       let o: z.ZodTypeAny = z.record(z.unknown());
       if (schema.description) o = o.describe(schema.description);
@@ -81,7 +178,6 @@ export function jsonSchemaPropertyToZod(schema: JsonSchema): z.ZodTypeAny {
     }
 
     default: {
-      // oneOf/anyOf — treat as unknown
       let u: z.ZodTypeAny = z.unknown();
       if (schema.description) u = u.describe(schema.description);
       return u;
@@ -92,14 +188,23 @@ export function jsonSchemaPropertyToZod(schema: JsonSchema): z.ZodTypeAny {
 /**
  * Converts a JSON Schema object type to a Zod object schema.
  * This is the main entry point for converting MCP tool inputSchema.
+ *
+ * @param schema - The JSON Schema object to convert
+ * @param defs - Optional inherited `$defs` lookup table for `$ref` resolution
  */
-export function jsonSchemaToZod(schema: JsonSchema): z.ZodObject<z.ZodRawShape> {
+export function jsonSchemaToZod(
+  schema: JsonSchema,
+  defs?: Record<string, JsonSchema>,
+): z.ZodObject<z.ZodRawShape> {
+  // Merge schema-level $defs with any inherited defs (schema-level wins)
+  const mergedDefs: Record<string, JsonSchema> = { ...defs, ...schema.$defs };
+
   const properties = schema.properties ?? {};
   const required = new Set(schema.required ?? []);
 
   const shape: z.ZodRawShape = {};
   for (const [key, propSchema] of Object.entries(properties)) {
-    let zodProp = jsonSchemaPropertyToZod(propSchema);
+    let zodProp = jsonSchemaPropertyToZod(propSchema, mergedDefs);
     if (!required.has(key)) {
       zodProp = zodProp.optional();
     }
