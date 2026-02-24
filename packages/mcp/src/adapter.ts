@@ -218,9 +218,14 @@ export function adaptMCPTool(
     ? stripInjectedKeys(fullSchema, injectedKeys)
     : fullSchema;
 
+  const baseDescription = tool.description ?? `MCP tool: ${tool.name} (from ${serverName})`;
+  const description = injectedKeys.length > 0
+    ? `${baseDescription} (Note: ${injectedKeys.join(', ')} provided automatically — do not include.)`
+    : baseDescription;
+
   return {
     name: qualifiedName,
-    description: tool.description ?? `MCP tool: ${tool.name} (from ${serverName})`,
+    description,
     parameters,
     execute: async (params: unknown): Promise<{
       success: boolean;

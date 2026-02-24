@@ -416,6 +416,45 @@ describe('adaptMCPTool', () => {
       expect(result.success).toBe(true);
     });
 
+    it('appends auto-injection note to description when injectedParams provided', () => {
+      const tool = adaptMCPTool(
+        'market',
+        {
+          name: 'get_bars',
+          description: 'Get OHLCV bars for a ticker',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              api_key: { type: 'string' },
+              ticker: { type: 'string' },
+            },
+            required: ['api_key', 'ticker'],
+          },
+        },
+        mockCallTool,
+        { api_key: 'secret-key' },
+      );
+
+      expect(tool.description).toContain('Get OHLCV bars for a ticker');
+      expect(tool.description).toContain('api_key');
+      expect(tool.description).toContain('provided automatically');
+    });
+
+    it('does not append injection note when no injectedParams', () => {
+      const tool = adaptMCPTool(
+        'server',
+        {
+          name: 'ping',
+          description: 'Ping the server',
+          inputSchema: { type: 'object' },
+        },
+        mockCallTool,
+      );
+
+      expect(tool.description).toBe('Ping the server');
+      expect(tool.description).not.toContain('provided automatically');
+    });
+
     it('works with no injectedParams (backward compat)', async () => {
       mockCallTool.mockResolvedValueOnce({
         success: true,

@@ -118,7 +118,7 @@ export function buildSystemPrompt(config: Config, skillNames: string[], mcpTools
   }
 
   const mcpSection = mcpTools.length > 0
-    ? `\n## MCP Tools (External)\n\nThe following tools are provided by connected MCP servers and can be called directly:\n${mcpTools.map(t => `  - **${t.name}** — ${t.description}`).join('\n')}\n\nThese tools are also available within pipelines when a skill references the MCP server name in its tools_required/tools_optional.\n`
+    ? `\n## MCP Tools (External)\n\nThe following tools are provided by connected MCP servers and can be called directly:\n${mcpTools.map(t => `  - **${t.name}** — ${t.description}`).join('\n')}\n\nAuthentication and API keys for MCP tools are handled automatically. Do not attempt to provide api_key or authentication parameters — they are injected by the system.\n\nThese tools are also available within pipelines when a skill references the MCP server name in its tools_required/tools_optional.\n`
     : '';
 
   const agentSkillList = options.agentSkillSummaries && options.agentSkillSummaries.length > 0

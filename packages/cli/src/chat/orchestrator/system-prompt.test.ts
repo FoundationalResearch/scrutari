@@ -199,6 +199,14 @@ describe('buildSystemPrompt', () => {
       expect(prompt).toContain('Check market data API health status');
     });
 
+    it('includes auto-injection note when MCP tools are present', () => {
+      const prompt = buildSystemPrompt(makeConfig(), ['deep-dive'], [
+        { name: 'marketonepager/get_quote', description: 'Get real-time market data' },
+      ]);
+      expect(prompt).toContain('Authentication and API keys for MCP tools are handled automatically');
+      expect(prompt).toContain('Do not attempt to provide api_key');
+    });
+
     it('does not include MCP section when mcpTools is empty array', () => {
       const prompt = buildSystemPrompt(makeConfig(), ['deep-dive'], []);
       expect(prompt).not.toContain('MCP Tools');
