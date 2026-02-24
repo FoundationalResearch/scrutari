@@ -6,36 +6,31 @@ import { PipelineProgress } from './PipelineProgress.js';
 import { DryRunPreview } from './DryRunPreview.js';
 import type { ChatMessage } from '../types.js';
 
-interface MessageListProps {
-  messages: ChatMessage[];
-  streamingMessageId?: string;
+interface MessageItemProps {
+  msg: ChatMessage;
+  isStreaming: boolean;
   verbose?: boolean;
 }
 
-export function MessageList({ messages, streamingMessageId, verbose }: MessageListProps): React.ReactElement {
+/** Renders a single message with its thinking block, pipeline progress, and dry-run preview. */
+export function MessageItem({ msg, isStreaming, verbose }: MessageItemProps): React.ReactElement {
+  const hasSegments = msg.thinkingSegments && msg.thinkingSegments.length > 0;
   return (
-    <Box flexDirection="column">
-      {messages.map(msg => {
-        const hasSegments = msg.thinkingSegments && msg.thinkingSegments.length > 0;
-        return (
-          <Box key={msg.id} flexDirection="column" marginBottom={0}>
-            {msg.thinking && !hasSegments && (
-              <ThinkingBlock content={msg.thinking} verbose={verbose} isStreaming={msg.id === streamingMessageId} />
-            )}
-            <MessageBubble
-              message={msg}
-              isStreaming={msg.id === streamingMessageId}
-              verbose={verbose}
-            />
-            {msg.dryRunPreview && (
-              <DryRunPreview data={msg.dryRunPreview} />
-            )}
-            {msg.pipelineState && (
-              <PipelineProgress state={msg.pipelineState} />
-            )}
-          </Box>
-        );
-      })}
+    <Box flexDirection="column" marginBottom={0}>
+      {msg.thinking && !hasSegments && (
+        <ThinkingBlock content={msg.thinking} verbose={verbose} isStreaming={isStreaming} />
+      )}
+      <MessageBubble
+        message={msg}
+        isStreaming={isStreaming}
+        verbose={verbose}
+      />
+      {msg.dryRunPreview && (
+        <DryRunPreview data={msg.dryRunPreview} />
+      )}
+      {msg.pipelineState && (
+        <PipelineProgress state={msg.pipelineState} />
+      )}
     </Box>
   );
 }

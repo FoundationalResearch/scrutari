@@ -9,6 +9,7 @@ import { filterActiveRules } from '../../context/rules.js';
 import type { ChatMessage, ThinkingSegment, ToolCallInfo, OrchestratorConfig, PipelineEvent, PipelineRunState, DryRunPreviewData } from '../types.js';
 import type { StageState } from '../../tui/types.js';
 import { runOrchestrator } from '../orchestrator/agent.js';
+import { useThrottledUpdate } from './useThrottledUpdate.js';
 
 interface UseOrchestratorOptions {
   config: Config;
@@ -84,6 +85,10 @@ export function useOrchestrator({
   const sessionSpentRef = useRef(initialSessionCost ?? 0);
   const [sessionSpentUsd, setSessionSpentUsd] = useState(initialSessionCost ?? 0);
 
+  // Throttle high-frequency streaming updates (text/reasoning deltas) to
+  // ~10 renders/sec instead of 20-50, preventing terminal flicker.
+  const { throttledUpdate, flush: flushUpdates } = useThrottledUpdate(updateMessage);
+
   const abort = useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -157,12 +162,12 @@ export function useOrchestrator({
       verbose,
       onTextDelta: (delta: string) => {
         accContent += delta;
-        updateMessage(assistantId, { content: accContent });
+        throttledUpdate(assistantId, { content: accContent });
       },
       onReasoningDelta: (delta: string) => {
         accThinking += delta;
         currentThinkingBuffer += delta;
-        updateMessage(assistantId, { thinking: accThinking });
+        throttledUpdate(assistantId, { thinking: accThinking });
       },
       onToolCallStart: (info: ToolCallInfo) => {
         if (currentThinkingBuffer.trim()) {
@@ -340,6 +345,9 @@ export function useOrchestrator({
 
     runWithHooks()
       .then((result) => {
+        // Flush any buffered streaming updates before final processing
+        flushUpdates();
+
         // Report actual token usage for calibration
         if (onUsageUpdate && result.usage) {
           onUsageUpdate(result.usage.inputTokens);
@@ -399,6 +407,7 @@ export function useOrchestrator({
         }];
       })
       .catch((err) => {
+        flushUpdates();
         if (err instanceof Error && err.name === 'AbortError') {
           updateMessage(assistantId, { content: accContent + '\n[Aborted]' });
         } else {

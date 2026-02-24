@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, useApp, useInput } from 'ink';
+import { Box, Static, useApp, useInput } from 'ink';
 import type { MCPClientManager } from '@scrutari/mcp';
 import type { SkillSummary, AgentSkillSummary, HookManager } from '@scrutari/core';
 import { loadSkillFile, estimatePipelineCost, scanSkillFiles } from '@scrutari/core';
@@ -9,8 +9,9 @@ import { findPersona, loadAllPersonas } from '../context/personas.js';
 import { saveMemory, recordTickerMention, recordAnalysis } from '../context/memory.js';
 import type { UserMemory } from '../context/types.js';
 import type { SessionSummary } from './session/types.js';
+import type { ChatMessage } from './types.js';
 import { WelcomeBanner } from './components/WelcomeBanner.js';
-import { MessageList } from './components/MessageList.js';
+import { MessageItem } from './components/MessageList.js';
 import { InputPrompt } from './components/InputPrompt.js';
 import { ApprovalPrompt } from './components/ApprovalPrompt.js';
 import { ToolPermissionPrompt } from './components/ToolPermissionPrompt.js';
@@ -464,6 +465,27 @@ export function ChatApp({
     ? session.title
     : undefined;
 
+  // Split messages into completed (rendered once via Static) and streaming (dynamic).
+  // This prevents completed messages from re-rendering during streaming, which
+  // eliminates flickering and makes text copyable.
+  type StaticItem =
+    | { id: string; type: 'banner' }
+    | { id: string; type: 'message'; msg: ChatMessage };
+
+  const staticItems = useMemo<StaticItem[]>(() => {
+    const items: StaticItem[] = [{ id: '__banner__', type: 'banner' }];
+    for (const m of messages) {
+      if (m.id !== streamingMessageId) {
+        items.push({ id: m.id, type: 'message', msg: m });
+      }
+    }
+    return items;
+  }, [messages, streamingMessageId]);
+
+  const streamingMessage = streamingMessageId
+    ? messages.find(m => m.id === streamingMessageId)
+    : undefined;
+
   if (showSkillBrowser && skillSummaries) {
     return (
       <Box flexDirection="column">
@@ -495,50 +517,62 @@ export function ChatApp({
   }
 
   return (
-    <Box flexDirection="column">
-      <WelcomeBanner
-        version={version}
-        model={config.defaults.model}
-        provider={config.defaults.provider}
-        cwd={cwd}
-        sessionInfo={sessionInfo}
-        recentSessions={recentSessions}
-      />
-      <MessageList
-        messages={messages}
-        streamingMessageId={streamingMessageId ?? undefined}
-        verbose={verbose}
-      />
-      <ContextUsageBar
-        currentTokens={compactionState.contextUsage.estimatedTokens}
-        maxTokens={compactionState.contextUsage.maxTokens}
-        isCompacting={compactionState.isCompacting}
-      />
-      <BudgetDisplay spentUsd={sessionSpentUsd} budgetUsd={config.defaults.session_budget_usd} />
-      {pendingApproval ? (
-        <ApprovalPrompt
-          estimate={pendingApproval.estimate}
-          onApprove={() => handleApproval(true)}
-          onDeny={() => handleApproval(false)}
+    <>
+      <Static items={staticItems}>
+        {(item) => {
+          if (item.type === 'banner') {
+            return (
+              <WelcomeBanner
+                key={item.id}
+                version={version}
+                model={config.defaults.model}
+                provider={config.defaults.provider}
+                cwd={cwd}
+                sessionInfo={sessionInfo}
+                recentSessions={recentSessions}
+              />
+            );
+          }
+          return (
+            <MessageItem key={item.id} msg={item.msg} isStreaming={false} verbose={verbose} />
+          );
+        }}
+      </Static>
+      <Box flexDirection="column">
+        {streamingMessage && (
+          <MessageItem msg={streamingMessage} isStreaming={true} verbose={verbose} />
+        )}
+        <ContextUsageBar
+          currentTokens={compactionState.contextUsage.estimatedTokens}
+          maxTokens={compactionState.contextUsage.maxTokens}
+          isCompacting={compactionState.isCompacting}
         />
-      ) : pendingToolPermission ? (
-        <ToolPermissionPrompt
-          toolName={pendingToolPermission.toolName}
-          args={pendingToolPermission.args}
-          onApprove={() => handleToolPermission(true)}
-          onDeny={() => handleToolPermission(false)}
-        />
-      ) : (
-        <InputPrompt
-          onSubmit={handleInput}
-          disabled={isProcessing}
-          planMode={planMode}
-          dryRun={dryRun}
-          readOnly={readOnly}
-          onEscapeMode={handleEscapeMode}
-          commands={commands}
-        />
-      )}
-    </Box>
+        <BudgetDisplay spentUsd={sessionSpentUsd} budgetUsd={config.defaults.session_budget_usd} />
+        {pendingApproval ? (
+          <ApprovalPrompt
+            estimate={pendingApproval.estimate}
+            onApprove={() => handleApproval(true)}
+            onDeny={() => handleApproval(false)}
+          />
+        ) : pendingToolPermission ? (
+          <ToolPermissionPrompt
+            toolName={pendingToolPermission.toolName}
+            args={pendingToolPermission.args}
+            onApprove={() => handleToolPermission(true)}
+            onDeny={() => handleToolPermission(false)}
+          />
+        ) : (
+          <InputPrompt
+            onSubmit={handleInput}
+            disabled={isProcessing}
+            planMode={planMode}
+            dryRun={dryRun}
+            readOnly={readOnly}
+            onEscapeMode={handleEscapeMode}
+            commands={commands}
+          />
+        )}
+      </Box>
+    </>
   );
 }
