@@ -476,6 +476,99 @@ describe('adaptMCPTool', () => {
       expect(result.success).toBe(true);
     });
   });
+
+  describe('empty result handling', () => {
+    it('returns descriptive message when content array is empty', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        success: true,
+        content: [],
+        isError: false,
+      });
+
+      const tool = adaptMCPTool(
+        'market',
+        {
+          name: 'get_data',
+          description: 'Get data',
+          inputSchema: { type: 'object' },
+        },
+        mockCallTool,
+      );
+
+      const result = await tool.execute({}, {});
+      expect(result.success).toBe(true);
+      expect(typeof result.data).toBe('string');
+      expect(result.data as string).toContain('returned no content');
+    });
+
+    it('returns descriptive message when text content is empty string', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        success: true,
+        content: [{ type: 'text', text: '' }],
+        isError: false,
+      });
+
+      const tool = adaptMCPTool(
+        'market',
+        {
+          name: 'get_data',
+          description: 'Get data',
+          inputSchema: { type: 'object' },
+        },
+        mockCallTool,
+      );
+
+      const result = await tool.execute({}, {});
+      expect(result.success).toBe(true);
+      expect(typeof result.data).toBe('string');
+      expect(result.data as string).toContain('returned empty text');
+    });
+
+    it('returns descriptive message when content has only non-text items', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        success: true,
+        content: [{ type: 'image', data: 'base64...', mimeType: 'image/png' }],
+        isError: false,
+      });
+
+      const tool = adaptMCPTool(
+        'market',
+        {
+          name: 'get_chart',
+          description: 'Get chart',
+          inputSchema: { type: 'object' },
+        },
+        mockCallTool,
+      );
+
+      const result = await tool.execute({}, {});
+      expect(result.success).toBe(true);
+      expect(typeof result.data).toBe('string');
+      expect(result.data as string).toContain('returned empty text');
+    });
+
+    it('preserves valid non-empty text content', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        success: true,
+        content: [{ type: 'text', text: '{"price": 142.5}' }],
+        isError: false,
+      });
+
+      const tool = adaptMCPTool(
+        'market',
+        {
+          name: 'get_price',
+          description: 'Get price',
+          inputSchema: { type: 'object' },
+        },
+        mockCallTool,
+      );
+
+      const result = await tool.execute({}, {});
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ price: 142.5 });
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

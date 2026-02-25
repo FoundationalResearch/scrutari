@@ -1377,4 +1377,145 @@ describe('read-only mode interactions', () => {
     // run_pipeline should be excluded by read-only mode
     expect(tools).not.toHaveProperty('run_pipeline');
   });
+
+  describe('manage_config show api_keys and mcp_servers', () => {
+    it('returns api_keys status as booleans', async () => {
+      const config = makeConfig({
+        providers: {
+          anthropic: { api_key: 'sk-test', default_model: 'claude-sonnet-4-20250514' },
+          openai: { api_key: undefined, default_model: 'gpt-4o' },
+          google: { api_key: 'gk-test', default_model: 'gemini-2.5-flash' },
+          minimax: { api_key: undefined, default_model: 'MiniMax-M2' },
+        },
+        tools: { market_data: { api_key: 'md-key' }, marketonepager: {}, news: { api_key: 'news-key' } },
+      });
+      const tools = createOrchestratorTools(config, makeOrchestratorConfig());
+      const configTool = (tools as unknown as Record<string, { execute: (params: { action: string }) => Promise<unknown> }>).manage_config;
+      const result = await configTool.execute({ action: 'show' }) as Record<string, unknown>;
+
+      expect(result).toHaveProperty('api_keys');
+      const apiKeys = result.api_keys as Record<string, boolean>;
+      expect(apiKeys.anthropic).toBe(true);
+      expect(apiKeys.openai).toBe(false);
+      expect(apiKeys.google).toBe(true);
+      expect(apiKeys.minimax).toBe(false);
+      expect(apiKeys.market_data).toBe(true);
+      expect(apiKeys.marketonepager).toBe(false);
+      expect(apiKeys.news).toBe(true);
+    });
+
+    it('returns mcp_servers with connected server info', async () => {
+      const mcpClient = makeMockMCPClient([
+        { name: 'bloomberg/get_quote', description: 'Get quote', serverName: 'bloomberg' },
+        { name: 'bloomberg/get_news', description: 'Get news', serverName: 'bloomberg' },
+      ]);
+      const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig(), mcpClient);
+      const configTool = (tools as unknown as Record<string, { execute: (params: { action: string }) => Promise<unknown> }>).manage_config;
+      const result = await configTool.execute({ action: 'show' }) as Record<string, unknown>;
+
+      expect(result).toHaveProperty('mcp_servers');
+      const servers = result.mcp_servers as Array<{ name: string; transport: string; tool_count: number }>;
+      expect(servers).toHaveLength(1);
+      expect(servers[0].name).toBe('bloomberg');
+      expect(servers[0].tool_count).toBe(2);
+    });
+
+    it('returns empty mcp_servers when no mcpClient', async () => {
+      const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig());
+      const configTool = (tools as unknown as Record<string, { execute: (params: { action: string }) => Promise<unknown> }>).manage_config;
+      const result = await configTool.execute({ action: 'show' }) as Record<string, unknown>;
+
+      expect(result).toHaveProperty('mcp_servers');
+      const servers = result.mcp_servers as unknown[];
+      expect(servers).toHaveLength(0);
+    });
+
+    it('never exposes actual API key values', async () => {
+      const config = makeConfig({
+        providers: {
+          anthropic: { api_key: 'sk-ant-secret-key-12345', default_model: 'claude-sonnet-4-20250514' },
+          openai: { api_key: undefined, default_model: 'gpt-4o' },
+          google: { api_key: undefined, default_model: 'gemini-2.5-flash' },
+          minimax: { api_key: undefined, default_model: 'MiniMax-M2' },
+        },
+      });
+      const tools = createOrchestratorTools(config, makeOrchestratorConfig());
+      const configTool = (tools as unknown as Record<string, { execute: (params: { action: string }) => Promise<unknown> }>).manage_config;
+      const result = await configTool.execute({ action: 'show' });
+      const resultStr = JSON.stringify(result);
+      expect(resultStr).not.toContain('sk-ant-secret-key-12345');
+    });
+  });
+
+  describe('MCP empty result handling', () => {
+    it('returns message object for empty string result.data', async () => {
+      const mcpClient = makeMockMCPClient([
+        { name: 'market/get_data', description: 'Get data', serverName: 'market' },
+      ]);
+      const adaptedTools = mcpClient.listTools();
+      (adaptedTools[0].execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        data: '',
+      });
+
+      const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig(), mcpClient);
+      const mcpTool = (tools as unknown as Record<string, { execute: (args: Record<string, unknown>) => Promise<unknown> }>)['market/get_data'];
+      const result = await mcpTool.execute({ query: 'test' });
+
+      expect(result).toHaveProperty('message');
+      expect((result as { message: string }).message).toContain('returned no data');
+    });
+
+    it('returns message object for null result.data', async () => {
+      const mcpClient = makeMockMCPClient([
+        { name: 'market/get_data', description: 'Get data', serverName: 'market' },
+      ]);
+      const adaptedTools = mcpClient.listTools();
+      (adaptedTools[0].execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        data: null,
+      });
+
+      const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig(), mcpClient);
+      const mcpTool = (tools as unknown as Record<string, { execute: (args: Record<string, unknown>) => Promise<unknown> }>)['market/get_data'];
+      const result = await mcpTool.execute({ query: 'test' });
+
+      expect(result).toHaveProperty('message');
+      expect((result as { message: string }).message).toContain('returned no data');
+    });
+
+    it('passes through legitimate falsy value 0', async () => {
+      const mcpClient = makeMockMCPClient([
+        { name: 'market/get_count', description: 'Get count', serverName: 'market' },
+      ]);
+      const adaptedTools = mcpClient.listTools();
+      (adaptedTools[0].execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        data: 0,
+      });
+
+      const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig(), mcpClient);
+      const mcpTool = (tools as unknown as Record<string, { execute: (args: Record<string, unknown>) => Promise<unknown> }>)['market/get_count'];
+      const result = await mcpTool.execute({ query: 'test' });
+
+      expect(result).toBe(0);
+    });
+
+    it('passes through legitimate falsy value false', async () => {
+      const mcpClient = makeMockMCPClient([
+        { name: 'market/is_open', description: 'Check if market is open', serverName: 'market' },
+      ]);
+      const adaptedTools = mcpClient.listTools();
+      (adaptedTools[0].execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        data: false,
+      });
+
+      const tools = createOrchestratorTools(makeConfig(), makeOrchestratorConfig(), mcpClient);
+      const mcpTool = (tools as unknown as Record<string, { execute: (args: Record<string, unknown>) => Promise<unknown> }>)['market/is_open'];
+      const result = await mcpTool.execute({ query: 'test' });
+
+      expect(result).toBe(false);
+    });
+  });
 });

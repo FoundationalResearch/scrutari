@@ -67,7 +67,7 @@ function mcpToToolDefinitions(mcpTools: AdaptedToolDefinition[]): ToolDefinition
 /**
  * Converts MCP AdaptedToolDefinitions to AI SDK tool format for the orchestrator.
  */
-function mcpToAISDKTools(mcpTools: AdaptedToolDefinition[]): Record<string, {
+function mcpToAISDKTools(mcpTools: AdaptedToolDefinition[], options?: { verbose?: boolean }): Record<string, {
   description: string;
   inputSchema: z.ZodSchema;
   execute: (params: unknown) => Promise<unknown>;
@@ -84,8 +84,20 @@ function mcpToAISDKTools(mcpTools: AdaptedToolDefinition[]): Record<string, {
       inputSchema: t.parameters,
       execute: async (params: unknown) => {
         const result = await t.execute(params, {});
+
+        if (options?.verbose) {
+          const preview = typeof result.data === 'string'
+            ? result.data.slice(0, 200)
+            : JSON.stringify(result.data)?.slice(0, 200);
+          process.stderr.write(`[mcp-debug] ${t.name} | success=${result.success} | type=${typeof result.data} | data=${preview}\n`);
+        }
+
         if (!result.success) {
           return { error: result.error ?? 'MCP tool execution failed' };
+        }
+        // Guard against empty/falsy results that confuse the LLM
+        if (!result.data && result.data !== 0 && result.data !== false) {
+          return { message: `Tool "${t.name}" executed successfully but returned no data.` };
         }
         return result.data;
       },
@@ -157,7 +169,7 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
 
   // Get MCP tools once (stable for the lifetime of this tool set)
   const mcpTools = mcpClient?.listTools() ?? [];
-  const mcpOrchestratorTools = mcpToAISDKTools(mcpTools);
+  const mcpOrchestratorTools = mcpToAISDKTools(mcpTools, { verbose: orchestratorConfig.verbose });
   const mcpToolDefinitions = mcpToToolDefinitions(mcpTools);
 
   const allTools = {
@@ -635,6 +647,31 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
       }),
       execute: async ({ action, key, value }: { action: 'show' | 'set'; key?: string; value?: string }) => {
         if (action === 'show') {
+          const apiKeys: Record<string, boolean> = {
+            anthropic: !!config.providers.anthropic?.api_key,
+            openai: !!config.providers.openai?.api_key,
+            google: !!config.providers.google?.api_key,
+            minimax: !!config.providers.minimax?.api_key,
+            market_data: !!config.tools.market_data.api_key,
+            marketonepager: !!config.tools.marketonepager.api_key,
+            news: !!config.tools.news.api_key,
+          };
+
+          const mcpServers = mcpClient
+            ? mcpClient.getServerInfos().map(info => ({
+                name: info.name,
+                transport: info.transport,
+                tool_count: info.tools.length,
+                tools: info.tools.map(t => t.qualifiedName),
+              }))
+            : config.mcp.servers.map(s => ({
+                name: s.name,
+                transport: s.command ? 'stdio' as const : 'http' as const,
+                tool_count: 0,
+                tools: [] as string[],
+                connected: false,
+              }));
+
           return {
             provider: config.defaults.provider,
             model: config.defaults.model,
@@ -642,6 +679,8 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
             output_format: config.defaults.output_format,
             output_dir: config.defaults.output_dir,
             skills_dir: config.skills_dir,
+            api_keys: apiKeys,
+            mcp_servers: mcpServers,
           };
         }
         if (action === 'set' && key && value) {

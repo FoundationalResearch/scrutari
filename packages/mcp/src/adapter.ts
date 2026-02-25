@@ -397,6 +397,13 @@ export function adaptMCPTool(
             }
           }
 
+          // Guard against empty results that confuse the LLM
+          if (data === '' || data === null || data === undefined) {
+            data = result.content.length === 0
+              ? `Tool "${tool.name}" executed successfully but returned no content.`
+              : `Tool "${tool.name}" executed successfully but returned empty text.`;
+          }
+
           return {
             success: true,
             data,
