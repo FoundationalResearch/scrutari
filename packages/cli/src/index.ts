@@ -216,8 +216,16 @@ async function main(): Promise<void> {
   const marketonepagerKey = config.tools.marketonepager.api_key;
   if (marketonepagerKey) {
     const marketonepagerUrl = config.tools.marketonepager.url ?? 'http://localhost:8001/mcp';
-    const alreadyConfigured = config.mcp.servers.some(s => s.name === 'marketonepager');
-    if (!alreadyConfigured) {
+    const existingServer = config.mcp.servers.find(s => s.name === 'marketonepager');
+    if (existingServer) {
+      // Augment existing server config with API key if missing
+      if (!existingServer.headers?.['X-API-Key']) {
+        existingServer.headers = { ...existingServer.headers, 'X-API-Key': marketonepagerKey };
+      }
+      if (!existingServer.injectedParams?.api_key) {
+        existingServer.injectedParams = { ...existingServer.injectedParams, api_key: marketonepagerKey };
+      }
+    } else {
       config.mcp.servers.push({
         name: 'marketonepager',
         url: marketonepagerUrl,
