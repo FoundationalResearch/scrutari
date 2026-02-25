@@ -354,6 +354,27 @@ export function createOrchestratorTools(config: Config, orchestratorConfig: Orch
           });
         });
 
+        pipeline.on('stage:tool-start', (event) => {
+          orchestratorConfig.onPipelineEvent({
+            type: 'stage:tool-start',
+            stageName: event.stageName,
+            toolName: event.toolName,
+            callId: event.callId,
+          });
+        });
+
+        pipeline.on('stage:tool-end', (event) => {
+          orchestratorConfig.onPipelineEvent({
+            type: 'stage:tool-end',
+            stageName: event.stageName,
+            toolName: event.toolName,
+            callId: event.callId,
+            durationMs: event.durationMs,
+            success: event.success,
+            error: event.error,
+          });
+        });
+
         try {
           const result = await pipeline.run();
 

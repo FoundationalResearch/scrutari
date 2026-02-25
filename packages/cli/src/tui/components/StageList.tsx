@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
 import type { StageState } from '../types.js';
+import { StageDetail } from './StageDetail.js';
 
 interface StageListProps {
   stages: StageState[];
@@ -69,7 +70,10 @@ export function StageList({ stages, currentStageIndex }: StageListProps): React.
     <Box flexDirection="column" marginBottom={1}>
       <Text bold dimColor>Stages:</Text>
       {stages.map((stage, i) => (
-        <StageRow key={stage.name} stage={stage} isCurrent={i === currentStageIndex} />
+        <React.Fragment key={stage.name}>
+          <StageRow stage={stage} isCurrent={i === currentStageIndex} />
+          <StageDetail stage={stage} />
+        </React.Fragment>
       ))}
     </Box>
   );

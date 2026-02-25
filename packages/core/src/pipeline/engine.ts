@@ -65,6 +65,21 @@ export interface PipelineErrorEvent {
   stageName?: string;
 }
 
+export interface StageToolStartEvent {
+  stageName: string;
+  toolName: string;
+  callId: string;
+}
+
+export interface StageToolEndEvent {
+  stageName: string;
+  toolName: string;
+  callId: string;
+  durationMs: number;
+  success: boolean;
+  error?: string;
+}
+
 export interface VerificationCompleteEvent {
   report: VerificationReport;
   stageName: string;
@@ -76,6 +91,8 @@ export interface PipelineEvents {
   'stage:stream': (event: StageStreamEvent) => void;
   'stage:complete': (event: StageCompleteEvent) => void;
   'stage:error': (event: StageErrorEvent) => void;
+  'stage:tool-start': (event: StageToolStartEvent) => void;
+  'stage:tool-end': (event: StageToolEndEvent) => void;
   'pipeline:complete': (event: PipelineCompleteEvent) => void;
   'pipeline:error': (event: PipelineErrorEvent) => void;
   'tool:unavailable': (event: ToolUnavailableEvent) => void;
@@ -468,6 +485,12 @@ export class PipelineEngine extends EventEmitter<PipelineEvents> {
     });
     subEngine.on('stage:error', (event) => {
       this.emit('stage:error', { ...event, stageName: `${prefix}/${event.stageName}` });
+    });
+    subEngine.on('stage:tool-start', (event) => {
+      this.emit('stage:tool-start', { ...event, stageName: `${prefix}/${event.stageName}` });
+    });
+    subEngine.on('stage:tool-end', (event) => {
+      this.emit('stage:tool-end', { ...event, stageName: `${prefix}/${event.stageName}` });
     });
 
     try {

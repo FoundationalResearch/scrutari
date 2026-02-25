@@ -1,4 +1,5 @@
-import type { ToolSet } from 'ai';
+import type { ToolSet, Tool } from 'ai';
+import { randomUUID } from 'node:crypto';
 import type { CostTracker } from '../router/cost.js';
 import type { ProviderRegistry } from '../router/providers.js';
 import { callLLM, streamLLM } from '../router/llm.js';
@@ -100,8 +101,9 @@ export async function runTaskAgent(ctx: TaskAgentContext): Promise<TaskAgentOutc
     let result: { content: string; inputTokens: number; outputTokens: number };
 
     if (hasTools) {
+      const wrappedTools = wrapToolsWithEvents(stageTools, stage.name, emit);
       result = await executeWithTools(
-        stage, modelId, model, systemPrompt, messages, stageTools,
+        stage, modelId, model, systemPrompt, messages, wrappedTools,
         budget, abortSignal, emit, maxTokens, temperature, maxToolSteps,
       );
     } else {
@@ -215,6 +217,56 @@ async function executeWithTools(
     inputTokens: response.usage.inputTokens,
     outputTokens: response.usage.outputTokens,
   };
+}
+
+/**
+ * Wraps each tool's execute function to emit stage:tool-start and stage:tool-end events,
+ * giving visibility into tool calls during pipeline execution.
+ */
+export function wrapToolsWithEvents(
+  tools: ToolSet,
+  stageName: string,
+  emit: (event: string, data: unknown) => void,
+): ToolSet {
+  const wrapped: ToolSet = {};
+  for (const [name, tool] of Object.entries(tools)) {
+    const typedTool = tool as Tool;
+    const originalExecute = typedTool.execute;
+    if (!originalExecute) {
+      wrapped[name] = tool;
+      continue;
+    }
+    wrapped[name] = {
+      ...typedTool,
+      execute: async (...args: Parameters<NonNullable<Tool['execute']>>) => {
+        const callId = randomUUID();
+        const start = Date.now();
+        emit('stage:tool-start', { stageName, toolName: name, callId });
+        try {
+          const result = await originalExecute(...args);
+          emit('stage:tool-end', {
+            stageName,
+            toolName: name,
+            callId,
+            durationMs: Date.now() - start,
+            success: true,
+          });
+          return result;
+        } catch (err) {
+          emit('stage:tool-end', {
+            stageName,
+            toolName: name,
+            callId,
+            durationMs: Date.now() - start,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          throw err;
+        }
+      },
+    };
+  }
+  return wrapped;
 }
 
 function resolveStageTools(stage: SkillStage, resolveTools?: ToolResolver): ToolSet | undefined {

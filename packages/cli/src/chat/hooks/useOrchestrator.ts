@@ -7,7 +7,7 @@ import { calculateCost } from '@scrutari/core';
 import type { ContextBundle } from '../../context/types.js';
 import { filterActiveRules } from '../../context/rules.js';
 import type { ChatMessage, ThinkingSegment, ToolCallInfo, OrchestratorConfig, PipelineEvent, PipelineRunState, DryRunPreviewData } from '../types.js';
-import type { StageState } from '../../tui/types.js';
+import type { StageState, StageToolCall } from '../../tui/types.js';
 import { runOrchestrator } from '../orchestrator/agent.js';
 import { useThrottledUpdate } from './useThrottledUpdate.js';
 
@@ -258,6 +258,67 @@ export function useOrchestrator({
               pipelineState.currentStageIndex = event.stageIndex;
             }
             updateMessage(assistantId, { pipelineState: { ...pipelineState } });
+            break;
+          }
+          case 'stage:stream': {
+            if (pipelineState) {
+              const idx = pipelineState.stages.findIndex(s => s.name === event.stageName);
+              if (idx >= 0) {
+                const stage = pipelineState.stages[idx];
+                const lines = stage.streamLines ?? [];
+                // Split chunk by newlines and append
+                const newLines = event.chunk.split('\n');
+                if (lines.length > 0 && newLines.length > 0) {
+                  // Append first part to last existing line
+                  lines[lines.length - 1] += newLines[0];
+                  lines.push(...newLines.slice(1));
+                } else {
+                  lines.push(...newLines);
+                }
+                // Cap at 20 lines
+                const capped = lines.length > 20 ? lines.slice(-20) : lines;
+                pipelineState.stages[idx] = { ...stage, streamLines: capped };
+                updateMessage(assistantId, { pipelineState: { ...pipelineState } });
+              }
+            }
+            break;
+          }
+          case 'stage:tool-start': {
+            if (pipelineState) {
+              const idx = pipelineState.stages.findIndex(s => s.name === event.stageName);
+              if (idx >= 0) {
+                const stage = pipelineState.stages[idx];
+                const toolCalls: StageToolCall[] = stage.toolCalls ?? [];
+                toolCalls.push({
+                  callId: event.callId,
+                  toolName: event.toolName,
+                  status: 'running',
+                });
+                pipelineState.stages[idx] = { ...stage, toolCalls: [...toolCalls] };
+                updateMessage(assistantId, { pipelineState: { ...pipelineState } });
+              }
+            }
+            break;
+          }
+          case 'stage:tool-end': {
+            if (pipelineState) {
+              const idx = pipelineState.stages.findIndex(s => s.name === event.stageName);
+              if (idx >= 0) {
+                const stage = pipelineState.stages[idx];
+                const toolCalls = stage.toolCalls ?? [];
+                const tcIdx = toolCalls.findIndex(tc => tc.callId === event.callId);
+                if (tcIdx >= 0) {
+                  toolCalls[tcIdx] = {
+                    ...toolCalls[tcIdx],
+                    status: event.success ? 'done' : 'error',
+                    durationMs: event.durationMs,
+                    error: event.error,
+                  };
+                  pipelineState.stages[idx] = { ...stage, toolCalls: [...toolCalls] };
+                  updateMessage(assistantId, { pipelineState: { ...pipelineState } });
+                }
+              }
+            }
             break;
           }
           case 'stage:complete': {

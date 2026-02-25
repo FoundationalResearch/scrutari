@@ -3,6 +3,8 @@ export {
   type StageStreamEvent,
   type StageCompleteEvent,
   type StageErrorEvent,
+  type StageToolStartEvent,
+  type StageToolEndEvent,
   type PipelineCompleteEvent,
   type PipelineErrorEvent,
   type PipelineEvents,
@@ -27,6 +29,7 @@ export {
   type TaskAgentResult,
   type TaskAgentOutcome,
   runTaskAgent,
+  wrapToolsWithEvents,
 } from './task-agent.js';
 
 export { Semaphore } from './semaphore.js';

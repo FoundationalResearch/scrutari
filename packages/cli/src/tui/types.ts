@@ -4,6 +4,14 @@ export type { PipelineEngine };
 
 export type StageStatus = 'pending' | 'running' | 'done' | 'error';
 
+export interface StageToolCall {
+  callId: string;
+  toolName: string;
+  status: 'running' | 'done' | 'error';
+  durationMs?: number;
+  error?: string;
+}
+
 export interface StageState {
   name: string;
   status: StageStatus;
@@ -11,6 +19,8 @@ export interface StageState {
   elapsedMs?: number;
   costUsd?: number;
   output?: string[];
+  toolCalls?: StageToolCall[];
+  streamLines?: string[];
 }
 
 export interface AnalysisState {

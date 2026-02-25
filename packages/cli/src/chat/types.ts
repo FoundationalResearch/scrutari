@@ -68,5 +68,7 @@ export type PipelineEvent =
   | { type: 'stage:stream'; stageName: string; chunk: string }
   | { type: 'stage:complete'; stageName: string; costUsd: number; durationMs: number }
   | { type: 'stage:error'; stageName: string; error: string }
+  | { type: 'stage:tool-start'; stageName: string; toolName: string; callId: string }
+  | { type: 'stage:tool-end'; stageName: string; toolName: string; callId: string; durationMs: number; success: boolean; error?: string }
   | { type: 'pipeline:complete'; totalCostUsd: number; report: string }
   | { type: 'pipeline:error'; error: string };
