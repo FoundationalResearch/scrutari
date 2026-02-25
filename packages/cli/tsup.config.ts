@@ -31,6 +31,7 @@ export default defineConfig({
     'marked',
     'marked-terminal',
     'react',
+    'ws',
     'yaml',
     'zod',
   ],

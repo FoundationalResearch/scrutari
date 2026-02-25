@@ -131,6 +131,8 @@ Options:
   --dry-run           Estimate pipeline costs without executing
   --read-only         Only allow read-only tools (quotes, filings, news)
   --persona <name>    Start with a specific persona active
+  --serve             Start the web UI server instead of terminal chat
+  --port <number>     Port for web UI server (default: 8003)
   --version           Print version
   --help              Show help
 

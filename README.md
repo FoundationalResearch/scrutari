@@ -675,6 +675,8 @@ Options:
   --dry-run           Estimate pipeline costs without executing
   --read-only         Only allow read-only tools (quotes, filings, news)
   --persona <name>    Start with a specific persona active
+  --serve             Start the web UI server instead of terminal chat
+  --port <number>     Port for web UI server (default: 8003)
   --version           Print version
   --help              Show help
 
@@ -694,6 +696,8 @@ Examples:
   scrutari --continue                   Resume last session
   scrutari --verbose                    Show LLM thinking tokens
   scrutari --persona equity-analyst     Start with equity-analyst persona
+  scrutari --serve                      Start web UI on localhost:8003
+  scrutari --serve --port 3000          Start web UI on custom port
   scrutari skill list                   List all skills
   scrutari skill install user/repo/my-skill
   scrutari mcp add my-server -- npx -y @some/mcp

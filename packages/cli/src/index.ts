@@ -54,6 +54,8 @@ ${chalk.bold('Options:')}
   --dry-run        Estimate pipeline costs without executing
   --read-only      Only allow read-only tools (quotes, filings, news)
   --persona <name> Start with a specific persona active
+  --serve          Start the web UI server instead of terminal chat
+  --port <number>  Port for web UI server (default: 8003)
   --version        Print version
   --help           Show this help
 
@@ -102,6 +104,8 @@ ${chalk.bold('Examples:')}
   ${chalk.dim('$')} scrutari mcp add my-server -- npx -y @some/mcp-server
   ${chalk.dim('$')} scrutari mcp add --transport http my-api http://localhost:3001/mcp
   ${chalk.dim('$')} scrutari mcp list
+  ${chalk.dim('$')} scrutari --serve
+  ${chalk.dim('$')} scrutari --serve --port 3000
 
 ${chalk.dim('Inside the chat, just type naturally:')}
   ${chalk.dim('>')} analyze NVDA
@@ -120,6 +124,8 @@ async function main(): Promise<void> {
       'dry-run': { type: 'boolean', default: false },
       'read-only': { type: 'boolean', default: false },
       persona: { type: 'string' },
+      serve: { type: 'boolean', default: false },
+      port: { type: 'string' },
       version: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
     },
@@ -257,6 +263,41 @@ async function main(): Promise<void> {
 
   // Load recent sessions for welcome banner
   const recentSessions = listSessions();
+
+  // Web UI mode
+  if (values.serve) {
+    const { startWebServer } = await import('./web/server.js');
+    const webPort = values.port ? parseInt(values.port as string, 10) : 8003;
+    if (isNaN(webPort) || webPort < 1 || webPort > 65535) {
+      console.error(chalk.red('Invalid port number. Use a value between 1 and 65535.'));
+      process.exit(1);
+    }
+    const { close } = startWebServer({
+      config,
+      version: VERSION,
+      port: webPort,
+      skillNames,
+      skillSummaries,
+      agentSkillSummaries,
+      mcpClient,
+      contextBundle,
+      hookManager,
+    });
+
+    // Handle graceful shutdown
+    const shutdown = async () => {
+      console.log('\n  Shutting down...');
+      await close();
+      if (mcpClient) await mcpClient.disconnect();
+      process.exit(0);
+    };
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+
+    // Keep the process alive
+    await new Promise(() => {});
+    return;
+  }
 
   // Render the chat app
   const { waitUntilExit } = render(
